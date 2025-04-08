@@ -1,3 +1,5 @@
+![image](https://github.com/user-attachments/assets/3d4e9bee-772b-4c57-84cb-b5a6da30efd5)
+
 # HiDreamSampler for ComfyUI
 
 A custom ComfyUI node for generating images using the HiDream AI model.
