@@ -188,44 +188,68 @@ def load_models(model_type):
     if is_fp8:
         print("     Type: FP8 (Special loading mode)")
         try:
-            # Try loading with FP8 configuration
-            print("     Loading model configuration...")
-            # Download configuration first
-            config_file = huggingface_hub.hf_hub_download(
-                repo_id=model_path, 
-                filename="transformer/config.json"
+            # First approach: Try normal loading with ignore_mismatched_sizes=True
+            print("     Attempt 1: Loading with ignore_mismatched_sizes=True...")
+            transformer_fp8_kwargs = {
+                "subfolder": "transformer",
+                "torch_dtype": torch.float16,  # Try float16 instead of bfloat16
+                "low_cpu_mem_usage": True,
+                "ignore_mismatched_sizes": True  # Key parameter to ignore issues
+            }
+            
+            transformer = HiDreamImageTransformer2DModel.from_pretrained(
+                model_path, 
+                **transformer_fp8_kwargs
             )
+            print("     Success! Loaded with ignore_mismatched_sizes=True")
             
-            # Create model from config
-            from transformers import PretrainedConfig
-            model_config = PretrainedConfig.from_json_file(config_file)
-            transformer = HiDreamImageTransformer2DModel._from_config(model_config)
+        except Exception as e1:
+            print(f"     First attempt failed: {e1}")
             
-            # Find and load weights
+            # Second approach: Manual config and loading
             try:
-                weights_file = huggingface_hub.hf_hub_download(
+                print("     Attempt 2: Manual loading with from_config...")
+                # Use from_config instead of _from_config
+                config_file = huggingface_hub.hf_hub_download(
                     repo_id=model_path, 
-                    filename="transformer/diffusion_pytorch_model.safetensors"
+                    filename="transformer/config.json"
                 )
-                state_dict = load_file(weights_file)
-            except Exception as e:
-                print(f"     Failed to load safetensors: {e}")
-                weights_file = huggingface_hub.hf_hub_download(
-                    repo_id=model_path, 
-                    filename="transformer/diffusion_pytorch_model.bin"
-                )
-                state_dict = torch.load(weights_file, map_location="cpu")
-            
-            # Load state dict with strict=False to skip missing parameters
-            transformer.load_state_dict(state_dict, strict=False)
-            print("     Successfully loaded FP8 model with missing parameters ignored")
-            
-        except Exception as e:
-            print(f"     FP8 loading failed: {e}")
-            import traceback
-            traceback.print_exc()
-            raise ValueError(f"Could not load FP8 model: {e}")
-            
+                
+                # Create model from config
+                from transformers import PretrainedConfig
+                model_config = PretrainedConfig.from_json_file(config_file)
+                
+                # Use from_config instead of _from_config
+                transformer = HiDreamImageTransformer2DModel.from_config(model_config)
+                
+                # Find and load weights
+                try:
+                    weights_file = huggingface_hub.hf_hub_download(
+                        repo_id=model_path, 
+                        filename="transformer/diffusion_pytorch_model.safetensors"
+                    )
+                    state_dict = load_file(weights_file)
+                except Exception as e:
+                    print(f"     Failed to load safetensors: {e}")
+                    weights_file = huggingface_hub.hf_hub_download(
+                        repo_id=model_path, 
+                        filename="transformer/diffusion_pytorch_model.bin"
+                    )
+                    state_dict = torch.load(weights_file, map_location="cpu")
+                
+                # Load state dict with strict=False to skip missing parameters
+                transformer.load_state_dict(state_dict, strict=False)
+                print("     Success! Loaded with from_config and strict=False")
+                
+            except Exception as e2:
+                print(f"     Second attempt failed: {e2}")
+                import traceback
+                traceback.print_exc()
+                
+                # If everything failed, suggest using a different model
+                print("     ⚠️ FP8 model failed to load. Please try a different model type.")
+                print("     Consider using NF4 models (fast-nf4, full-nf4) instead.")
+                raise ValueError(f"Could not load FP8 model: {e1}. Second attempt: {e2}")
     elif is_nf4:
         print("     Type: NF4")
         transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
