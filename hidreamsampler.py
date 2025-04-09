@@ -14,6 +14,8 @@ import comfy.model_management # Ensure this is imported
 import comfy.utils
 import gc
 import os # For checking paths if needed
+import huggingface_hub
+from safetensors.torch import load_file
 # --- Optional Dependency Handling ---
 try:
     import accelerate
@@ -181,75 +183,57 @@ def load_models(model_type):
     
     # --- 2. Load Transformer (Conditional) ---
     print(f"\n[2] Preparing Transformer from: {model_path}")
+    transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
     
-    # Special handling for FP8 models - they need a different loading approach
     if is_fp8:
         print("     Type: FP8 (Special loading mode)")
         try:
-            # Try using a modified loading approach for FP8
-            print("     Strategy 1: Loading with float16 dtype...")
-            transformer_load_kwargs = {
-                "subfolder": "transformer", 
-                "torch_dtype": torch.float16,  # Try float16 instead of bfloat16 for FP8
-                "low_cpu_mem_usage": True,
-                # Don't use quantization_config for FP8
-            }
+            # Try loading with FP8 configuration
+            print("     Loading model configuration...")
+            # Download configuration first
+            config_file = huggingface_hub.hf_hub_download(
+                repo_id=model_path, 
+                filename="transformer/config.json"
+            )
             
-            # For FP8 models, we need to patch the loading process to handle the missing input_scale
-            # Let's try a different loading approach entirely
-            import huggingface_hub
-            print("     Downloading model config to create from scratch...")
-            config_path = huggingface_hub.hf_hub_download(repo_id=model_path, filename="transformer/config.json")
+            # Create model from config
+            from transformers import PretrainedConfig
+            model_config = PretrainedConfig.from_json_file(config_file)
+            transformer = HiDreamImageTransformer2DModel._from_config(model_config)
             
-            # Load config and create model without weights first
-            from transformers import AutoConfig
-            transformer_config = AutoConfig.from_pretrained(config_path)
-            transformer = HiDreamImageTransformer2DModel._from_config(transformer_config)
-            print("     Created model from config, loading weights separately...")
-            
-            # Now load state dict manually with ignore option
-            import torch
-            from safetensors.torch import load_file
-            
-            # Try to find the weight file
+            # Find and load weights
             try:
-                model_file = huggingface_hub.hf_hub_download(
+                weights_file = huggingface_hub.hf_hub_download(
                     repo_id=model_path, 
-                    filename="transformer/diffusion_pytorch_model.safetensors",
-                    subfolder=None
+                    filename="transformer/diffusion_pytorch_model.safetensors"
                 )
-                state_dict = load_file(model_file)
+                state_dict = load_file(weights_file)
             except Exception as e:
-                print(f"     Could not load safetensors, trying PyTorch format: {e}")
-                model_file = huggingface_hub.hf_hub_download(
+                print(f"     Failed to load safetensors: {e}")
+                weights_file = huggingface_hub.hf_hub_download(
                     repo_id=model_path, 
-                    filename="transformer/diffusion_pytorch_model.bin",
-                    subfolder=None
+                    filename="transformer/diffusion_pytorch_model.bin"
                 )
-                state_dict = torch.load(model_file, map_location="cpu")
+                state_dict = torch.load(weights_file, map_location="cpu")
             
-            # Load the weights, ignoring missing keys
+            # Load state dict with strict=False to skip missing parameters
             transformer.load_state_dict(state_dict, strict=False)
-            print("     ✅ Successfully loaded model weights with missing keys ignored!")
+            print("     Successfully loaded FP8 model with missing parameters ignored")
             
         except Exception as e:
-            print(f"     ❌ FP8 loading failed: {e}")
-            print("     Disabling FP8 support. Please use non-FP8 models for now.")
-            raise ImportError(f"Could not load FP8 model: {e}")
+            print(f"     FP8 loading failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise ValueError(f"Could not load FP8 model: {e}")
             
     elif is_nf4:
         print("     Type: NF4")
-        transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
         transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
-    else: # Default BNB case
+    else:
+        # Default BNB case
         print("     Type: Standard (Applying 4-bit BNB quantization)")
         if bnb_transformer_4bit_config:
-            transformer_load_kwargs = {
-                "subfolder": "transformer", 
-                "torch_dtype": model_dtype, 
-                "low_cpu_mem_usage": True,
-                "quantization_config": bnb_transformer_4bit_config
-            }
+            transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
         else:
             raise ImportError("BNB config required for transformer but unavailable.")
         transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
