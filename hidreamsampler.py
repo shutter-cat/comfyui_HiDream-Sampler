@@ -14,27 +14,27 @@ from transformers import LlamaForCausalLM, PreTrainedTokenizerFast
 from transformers import BitsAndBytesConfig as TransformersBitsAndBytesConfig
 from diffusers import BitsAndBytesConfig as DiffusersBitsAndBytesConfig
 
-MODEL_PREFIX = "HiDream-ai"
-LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1"
+MODEL_PREFIX = "azaneko"
+LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
 
 # Model configurations
 MODEL_CONFIGS = {
     "dev": {
-        "path": f"{MODEL_PREFIX}/HiDream-I1-Dev",
+        "path": f"{MODEL_PREFIX}/HiDream-I1-Dev-nf4",
         "guidance_scale": 0.0,
         "num_inference_steps": 28,
         "shift": 6.0,
         "scheduler": FlashFlowMatchEulerDiscreteScheduler
     },
     "full": {
-        "path": f"{MODEL_PREFIX}/HiDream-I1-Full",
+        "path": f"{MODEL_PREFIX}/HiDream-I1-Full-nf4",
         "guidance_scale": 5.0,
         "num_inference_steps": 50,
         "shift": 3.0,
         "scheduler": FlowUniPCMultistepScheduler
     },
     "fast": {
-        "path": f"{MODEL_PREFIX}/HiDream-I1-Fast",
+        "path": f"{MODEL_PREFIX}/HiDream-I1-Fast-nf4",
         "guidance_scale": 0.0,
         "num_inference_steps": 16,
         "shift": 3.0,
@@ -53,43 +53,42 @@ RESOLUTION_OPTIONS = [
     "832 × 1248 (Portrait)"
 ]
 
-# Load models
-def load_models(model_type):
+def log_vram(msg: str):
+    print(f"{msg} (used {torch.cuda.memory_allocated() / 1024**2:.2f} MB VRAM)\n")
+
+def load_models(model_type: str):
     config = MODEL_CONFIGS[model_type]
-    pretrained_model_name_or_path = config["path"]
-    scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
     
-    tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
-        LLAMA_MODEL_NAME,
-        use_fast=False)
+    tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(LLAMA_MODEL_NAME)
+    log_vram("✅ Tokenizer loaded!")
     
     text_encoder_4 = LlamaForCausalLM.from_pretrained(
         LLAMA_MODEL_NAME,
         output_hidden_states=True,
         output_attentions=True,
-        low_cpu_mem_usage=True,
-        quantization_config=TransformersBitsAndBytesConfig(
-            load_in_4bit=True,
-        ),
+        return_dict_in_generate=True,
         torch_dtype=torch.bfloat16,
-        attn_implementation="eager").to("cuda")
-    
-    transformer = HiDreamImageTransformer2DModel.from_pretrained(
-        pretrained_model_name_or_path, 
-        subfolder="transformer",
-        quantization_config=DiffusersBitsAndBytesConfig(
-            load_in_4bit=True,
-        ), 
-        torch_dtype=torch.bfloat16).to("cuda")
+        device_map="auto",
+    )
+    log_vram("✅ Text encoder loaded!")
 
+    transformer = HiDreamImageTransformer2DModel.from_pretrained(
+        config["path"],
+        subfolder="transformer",
+        torch_dtype=torch.bfloat16
+    )
+    log_vram("✅ Transformer loaded!")
+    
     pipe = HiDreamImagePipeline.from_pretrained(
-        pretrained_model_name_or_path, 
-        scheduler=scheduler,
+        config["path"],
+        scheduler=FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False),
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,
-        torch_dtype=torch.bfloat16
-    ).to("cuda", torch.bfloat16)
+        torch_dtype=torch.bfloat16,
+    )
     pipe.transformer = transformer
+    log_vram("✅ Pipeline loaded!")
+    pipe.enable_sequential_cpu_offload()
     
     return pipe, config
 

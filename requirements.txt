@@ -1,6 +1,8 @@
 torch>=2.0.0
 numpy
 pillow
-transformers
+transformers>=4.47.1
 diffusers
 bitsandbytes
+optimum
+auto-gptq
