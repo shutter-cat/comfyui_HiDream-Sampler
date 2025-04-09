@@ -201,9 +201,12 @@ def load_models(model_type):
     print(f"\n[2] Preparing Transformer from: {model_path}"); transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
     if is_nf4: print("     Type: NF4")
     elif is_fp8: print("     Type: FP8")
-    else: print("     Type: Standard (Applying 4-bit BNB)")
-        if bnb_transformer_4bit_config: transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
-        else: raise ImportError("BNB config required for transformer.")
+    else: # Default BNB case
+        print("     Type: Standard (Applying 4-bit BNB quantization)")
+        if bnb_transformer_4bit_config:
+            transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
+        else:
+            raise ImportError("BNB config required for transformer but unavailable.")
     print("     Loading Transformer... (May download files)"); transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
     print("     Moving Transformer to CUDA..."); transformer.to("cuda")
     step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
