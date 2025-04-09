@@ -468,19 +468,19 @@ class HiDreamSampler:
             blank_image = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
             return (blank_image,)
 
+        # *** Get the is_nf4 flag for the current model ***
+        is_nf4_current = config.get("is_nf4", False)
+
         height, width = parse_resolution(resolution)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
 
-        # *** CHANGE HERE: Explicitly get CUDA device for Generator ***
-        try:
-            # Use comfy's helper to get the primary compute device (usually cuda:0)
+        try: # Use comfy's helper to get the primary compute device
             inference_device = comfy.model_management.get_torch_device()
         except Exception as e:
              print(f"Warning: Could not get device via comfy.model_management ({e}). Falling back.")
              inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Use this specific device for the generator
         print(f"Creating Generator on device: {inference_device}")
         generator = torch.Generator(device=inference_device).manual_seed(seed)
 
@@ -491,10 +491,17 @@ class HiDreamSampler:
 
         # --- Run Inference ---
         output_images = None
-        # Use the same inference_device determined above
         try:
-             print(f"Ensuring pipeline is on device: {inference_device}")
-             pipe.to(inference_device) # Ensure computation happens here
+             # *** CONDITIONAL pipe.to() call ***
+             if not is_nf4_current:
+                 # Only move pipe to device if CPU offload is NOT enabled
+                 print(f"Ensuring pipeline is on device: {inference_device} (Offload NOT enabled)")
+                 pipe.to(inference_device)
+             else:
+                 # If offload IS enabled, DO NOT move the whole pipe.
+                 # Offload handles moving components as needed.
+                 # The generator device still ensures random numbers are CUDA-based if needed.
+                 print(f"Skipping pipe.to({inference_device}) because sequential CPU offload is enabled.")
 
              with torch.inference_mode():
                  output_images = pipe( # ... (same pipeline call) ...
