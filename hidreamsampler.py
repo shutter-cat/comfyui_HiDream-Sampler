@@ -68,19 +68,23 @@ def load_models(model_type):
         output_hidden_states=True,
         output_attentions=True,
         low_cpu_mem_usage=True,
+        device_map="auto",
         quantization_config=TransformersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
         torch_dtype=torch.bfloat16,
-        attn_implementation="eager").to("cuda")
+        attn_implementation="eager"
+    )
     
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
-        pretrained_model_name_or_path, 
+        pretrained_model_name_or_path,
         subfolder="transformer",
         quantization_config=DiffusersBitsAndBytesConfig(
             load_in_4bit=True,
-        ), 
-        torch_dtype=torch.bfloat16).to("cuda")
+        ),
+        torch_dtype=torch.bfloat16,
+        device_map="auto"
+    )
 
     pipe = HiDreamImagePipeline.from_pretrained(
         pretrained_model_name_or_path, 
