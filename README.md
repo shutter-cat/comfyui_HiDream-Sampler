@@ -46,5 +46,5 @@ Please make sure you have installed Flash Attention. We recommend CUDA versions 
 - CUDA-enabled GPU (for model inference)
 
 ## Notes
-Models are cached after the first load to improve performance and use 4-bit quantization.
-Ensure you have sufficient VRAM (e.g., 12GB+ recommended for full mode).
+Models are cached after the first load to improve performance and use 4-bit quantization models from https://github.com/hykilpikonna/HiDream-I1-nf4.
+Ensure you have sufficient VRAM (e.g., 16GB+ recommended for full mode).
