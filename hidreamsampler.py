@@ -198,7 +198,6 @@ def load_models(model_type, use_uncensored_llm=False):
         else: raise ImportError("BNB config required for standard LLM.")
         text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
     
-    # The rest of the function stays exactly the same
     print(f"[1b] Loading Tokenizer: {llama_model_name}..."); tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False); print("     Tokenizer loaded.")
     print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)"); text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
     if "device_map" not in text_encoder_load_kwargs: print("     Moving text encoder to CUDA..."); text_encoder.to("cuda")
@@ -216,11 +215,14 @@ def load_models(model_type, use_uncensored_llm=False):
     print("     Loading Transformer... (May download files)"); transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
     print("     Moving Transformer to CUDA..."); transformer.to("cuda")
     step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
+    
     # --- 3. Load Scheduler ---
     print(f"\n[3] Preparing Scheduler: {scheduler_name}"); scheduler = get_scheduler_instance(scheduler_name, shift); print(f"     Using Scheduler: {scheduler_name}")
+    
     # --- 4. Load Pipeline ---
     print(f"\n[4] Loading Pipeline from: {model_path}"); print("     Passing pre-loaded components...")
     pipe = HiDreamImagePipeline.from_pretrained(model_path, scheduler=scheduler, tokenizer_4=tokenizer, text_encoder_4=text_encoder, transformer=None, torch_dtype=model_dtype, low_cpu_mem_usage=True); print("     Pipeline structure loaded.")
+    
     # --- 5. Final Setup ---
     print("\n[5] Finalizing Pipeline..."); print("     Assigning transformer..."); pipe.transformer = transformer
     print("     Moving pipeline object to CUDA (final check)...");
@@ -345,17 +347,27 @@ class HiDreamSampler:
     @classmethod
     def INPUT_TYPES(s):
         available_model_types = list(MODEL_CONFIGS.keys())
-        if not available_model_types: return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
+        if not available_model_types: 
+            return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
+        
         default_model = "fast-nf4" if "fast-nf4" in available_model_types else "fast" if "fast" in available_model_types else available_model_types[0]
-        return {"required": {
-            "model_type": (available_model_types, {"default": default_model}),
-            "prompt": ("STRING", {"multiline": True, "default": "..."}),
-            "resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),
-            "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), 
-            "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), 
-            "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
-            "use_uncensored_llm": ("BOOLEAN", {"default": False})
-        }}
+        
+        return {
+            "required": {
+                "model_type": (available_model_types, {"default": default_model}),
+                "prompt": ("STRING", {"multiline": True, "default": "..."}),
+                "resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), 
+                "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), 
+                "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
+                "use_uncensored_llm": ("BOOLEAN", {"default": False})
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "generate"
+    CATEGORY = "HiDream"
     
     def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
         # Monitor initial memory usage
@@ -384,7 +396,7 @@ class HiDreamSampler:
                 pipe, config = None, None
             if valid_cache:
                 print("Using cached model.")
-                
+        
         if pipe is None:
             if self._model_cache:
                 print(f"Clearing ALL cache before loading {model_type}...")
@@ -393,22 +405,33 @@ class HiDreamSampler:
                     print(f"  Removing '{key}'...")
                     try:
                         pipe_to_del, _ = self._model_cache.pop(key)
-                        # Basic cleanup to match original code
+                        # More aggressive cleanup - clear all major components
+                        if hasattr(pipe_to_del, 'transformer'):
+                            pipe_to_del.transformer = None
+                        if hasattr(pipe_to_del, 'text_encoder_4'):
+                            pipe_to_del.text_encoder_4 = None
+                        if hasattr(pipe_to_del, 'tokenizer_4'):
+                            pipe_to_del.tokenizer_4 = None
+                        if hasattr(pipe_to_del, 'scheduler'):
+                            pipe_to_del.scheduler = None
                         del pipe_to_del
-                    except Exception:
-                        pass
-                        
-                # Basic gc as in original code
-                gc.collect()
+                    except Exception as e:
+                        print(f"  Error removing {key}: {e}")
+                
+                # Multiple garbage collection passes
+                for _ in range(3):
+                    gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                    # Force synchronization
+                    torch.cuda.synchronize()
                 print("Cache cleared.")
                 
-            print(f"Loading model for {model_type}...")
+            print(f"Loading model for {model_type}{' (uncensored)' if use_uncensored_llm else ''}...")
             try:
-                pipe, config = load_models(model_type)
-                self._model_cache[model_type] = (pipe, config)
-                print(f"Model {model_type} loaded & cached!")
+                pipe, config = load_models(model_type, use_uncensored_llm)
+                self._model_cache[cache_key] = (pipe, config)
+                print(f"Model {model_type}{' (uncensored)' if use_uncensored_llm else ''} loaded & cached!")
             except Exception as e:
                 print(f"!!! ERROR loading {model_type}: {e}")
                 import traceback
@@ -435,12 +458,11 @@ class HiDreamSampler:
         generator = torch.Generator(device=inference_device).manual_seed(seed)
         
         print(f"\n--- Starting Generation ---")
-        print(f"Model: {model_type}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        print(f"Model: {model_type}{' (uncensored)' if use_uncensored_llm else ''}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
         
         # --- Run Inference ---
         output_images = None
         try:
-            # Same as original working code
             if not is_nf4_current: 
                 print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)")
                 pipe.to(inference_device)
@@ -449,7 +471,7 @@ class HiDreamSampler:
                 
             print("Executing pipeline inference...")
             with torch.inference_mode():
-                # Original working code
+                # Original inference code
                 output_images = pipe(
                     prompt=prompt,
                     height=height,
@@ -460,16 +482,17 @@ class HiDreamSampler:
                     generator=generator,
                 ).images
             print("Pipeline inference finished.")
-        except Exception as e:
+        except Exception as e: 
             print(f"!!! ERROR during execution: {e}")
             import traceback
             traceback.print_exc()
             return (torch.zeros((1, height, width, 3)),)
-        finally:
-            pbar.update_absolute(num_inference_steps)
+        finally: 
+            pbar.update_absolute(num_inference_steps) # Update pbar regardless
             
         print("--- Generation Complete ---")
         
+        # Robust output handling
         if output_images is None or len(output_images) == 0:
             print("ERROR: No images returned. Creating blank image.")
             return (torch.zeros((1, height, width, 3)),)
@@ -481,11 +504,11 @@ class HiDreamSampler:
                 print("ERROR: pil2tensor returned None. Creating blank image.")
                 return (torch.zeros((1, height, width, 3)),)
             
-            # Add fix for bfloat16 tensor issue
+            # Fix for bfloat16 tensor issue
             if output_tensor.dtype == torch.bfloat16:
                 print("Converting bfloat16 tensor to float32 for ComfyUI compatibility")
                 output_tensor = output_tensor.to(torch.float32)
-                
+            
             # Verify tensor shape is valid
             if len(output_tensor.shape) != 4 or output_tensor.shape[0] != 1 or output_tensor.shape[3] != 3:
                 print(f"ERROR: Invalid tensor shape {output_tensor.shape}. Creating blank image.")
