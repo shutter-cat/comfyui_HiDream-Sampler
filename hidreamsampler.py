@@ -65,63 +65,53 @@ def load_models(model_type):
         use_fast=False
     )
     
-    # Load 4-bit quantized LLaMA
+    # Load 4-bit quantized LLaMA with device_map="auto" for better memory management
     text_encoder_4 = LlamaForCausalLM.from_pretrained(
         LLAMA_MODEL_NAME,
         output_hidden_states=True,
         output_attentions=True,
         low_cpu_mem_usage=True,
+        device_map="auto",
         quantization_config=TransformersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,  # This is just a hint, 4-bit takes precedence
         attn_implementation="eager"
-    ).to("cuda")
+    )
     
-    # Load 4-bit quantized transformer
+    # Load 4-bit quantized transformer with device_map="auto"
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="transformer",
+        device_map="auto",
         quantization_config=DiffusersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
-        torch_dtype=torch.bfloat16
-    ).to("cuda")
+        torch_dtype=torch.bfloat16  # This is just a hint, 4-bit takes precedence
+    )
     
-    # Load the pipeline
+    # Load the pipeline WITHOUT converting to bfloat16
     pipe = HiDreamImagePipeline.from_pretrained(
         pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,
-        torch_dtype=torch.bfloat16
-    ).to("cuda", torch.bfloat16)
+        low_cpu_mem_usage=True,
+        device_map="auto"  # Let it manage memory placement
+    )
     
     # Set the transformer
     pipe.transformer = transformer
     
-    # Monkey patch the method without changing its signature
+    # Monkey patch the _get_clip_prompt_embeds method to handle device placement
     original_get_clip_prompt_embeds = pipe._get_clip_prompt_embeds
     
-    def patched_get_clip_prompt_embeds(*args, **kwargs):
-        self = args[0]  # The first arg is 'self'
-        
-        # Get all tensors in both args and kwargs and move them to the correct device
+    def patched_get_clip_prompt_embeds(self, text_input_ids, attention_mask=None):
         encoder_device = self.text_encoder_4.device
-        
-        # Process positional arguments after 'self'
-        new_args = list(args)
-        for i in range(1, len(args)):
-            if torch.is_tensor(args[i]):
-                new_args[i] = args[i].to(encoder_device)
-        
-        # Process keyword arguments
-        for key in kwargs:
-            if torch.is_tensor(kwargs[key]):
-                kwargs[key] = kwargs[key].to(encoder_device)
-        
-        # Call the original method with the updated args
-        return original_get_clip_prompt_embeds(*new_args, **kwargs)
+        text_input_ids = text_input_ids.to(encoder_device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(encoder_device)
+        return original_get_clip_prompt_embeds(self, text_input_ids, attention_mask=attention_mask)
     
     # Replace the method
     import types
