@@ -70,10 +70,8 @@ ORIGINAL_MODEL_PREFIX = "HiDream-ai"
 NF4_MODEL_PREFIX = "azaneko"
 ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1"
 NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
-# Add uncensored model
-UNCENSORED_LLAMA_MODEL_NAME = "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated"
-# We'll use the same uncensored model for both and handle quantization in code
-UNCENSORED_NF4_LLAMA_MODEL_NAME = "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated"
+UNCENSORED_LLAMA_MODEL_NAME = "mhugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
+UNCENSORED_NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
 
 # --- Model Configurations ---
 MODEL_CONFIGS = {
@@ -220,40 +218,36 @@ def load_models(model_type, use_uncensored_llm=False):
     
     if is_nf4:
         if use_uncensored_llm:
+            # For NF4 + uncensored, use the GPTQ model
             llama_model_name = UNCENSORED_NF4_LLAMA_MODEL_NAME
-            print(f"\n[1a] Preparing UNCENSORED LLM for NF4: {llama_model_name}")
-            
-            # Try 8-bit quantization for uncensored model
-            if bnb_available:
-                print("     Loading with 8-bit quantization (BitsAndBytes)")
-                from transformers import BitsAndBytesConfig
-                # Create 8-bit config (not 4-bit)
-                bnb_8bit_config = BitsAndBytesConfig(
-                    load_in_8bit=True,  # 8-bit is more compatible than 4-bit
-                    bnb_8bit_compute_dtype=torch.float16,
-                    bnb_8bit_use_double_quant=True,
-                )
-                text_encoder_load_kwargs["quantization_config"] = bnb_8bit_config
-                
-                # Use device_map to split across GPU and CPU
-                if accelerate_available:
-                    print("     Using mixed device placement (GPU + CPU)")
-                    text_encoder_load_kwargs["device_map"] = "auto"
-                    # Lower memory limit to leave room for transformer
-                    if hasattr(torch.cuda, 'get_device_properties') and torch.cuda.is_available():
-                        total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                        # Use less memory (30%) for LLM
-                        max_mem = int(total_mem * 0.3)
-                        text_encoder_load_kwargs["max_memory"] = {0: f"{max_mem}GiB"}
-                        print(f"     Setting max memory limit: {max_mem}GiB of {total_mem:.1f}GiB")
-            else:
-                print("     ⚠️ BitsAndBytes not available, falling back to standard model")
-                llama_model_name = NF4_LLAMA_MODEL_NAME
+            print(f"\n[1a] Preparing Uncensored LLM (GPTQ): {llama_model_name}")
         else:
-            # Original handling for standard NF4 models
             llama_model_name = NF4_LLAMA_MODEL_NAME
             print(f"\n[1a] Preparing LLM (GPTQ): {llama_model_name}")
+        
+        # Both standard and uncensored NF4 use the same loading approach with device_map
+        if accelerate_available:
+            text_encoder_load_kwargs["device_map"] = "auto"
+            # Set memory limits if using device_map
+            if hasattr(torch.cuda, 'get_device_properties') and torch.cuda.is_available():
+                total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                max_mem = int(total_mem * 0.4)
+                text_encoder_load_kwargs["max_memory"] = {0: f"{max_mem}GiB"}
+                print(f"     Setting max memory limit: {max_mem}GiB of {total_mem:.1f}GiB")
+            print("     Using device_map='auto'")
+        else:
+            print("     accelerate not found, attempting manual placement")
+    else:
+        # Standard models handling
+        if use_uncensored_llm:
+            # For non-NF4 + uncensored, we'll use the GPTQ model but need different loading strategy
+            llama_model_name = UNCENSORED_LLAMA_MODEL_NAME
+            print(f"\n[1a] Preparing Uncensored LLM: {llama_model_name}")
+            
+            # Use accelerate for GPTQ loading instead of BNB
             if accelerate_available:
+                # Remove BNB config which won't work with GPTQ model
+                text_encoder_load_kwargs.pop("quantization_config", None)
                 text_encoder_load_kwargs["device_map"] = "auto"
                 # Set memory limits if using device_map
                 if hasattr(torch.cuda, 'get_device_properties') and torch.cuda.is_available():
@@ -261,25 +255,21 @@ def load_models(model_type, use_uncensored_llm=False):
                     max_mem = int(total_mem * 0.4)
                     text_encoder_load_kwargs["max_memory"] = {0: f"{max_mem}GiB"}
                     print(f"     Setting max memory limit: {max_mem}GiB of {total_mem:.1f}GiB")
-                print("     Using device_map='auto'")
+                print("     Using device_map='auto' for GPTQ model")
             else:
-                print("     accelerate not found, attempting manual placement")
-    else:
-        # Standard models can use the uncensored version directly
-        if use_uncensored_llm:
-            llama_model_name = UNCENSORED_LLAMA_MODEL_NAME
-            print(f"\n[1a] Preparing UNCENSORED LLM (4-bit BNB): {llama_model_name}")
+                print("     ⚠️ Warning: accelerate not found, may have trouble loading GPTQ model")
         else:
+            # Original behavior for standard models
             llama_model_name = ORIGINAL_LLAMA_MODEL_NAME
             print(f"\n[1a] Preparing LLM (4-bit BNB): {llama_model_name}")
             
-        if bnb_llm_config:
-            text_encoder_load_kwargs["quantization_config"] = bnb_llm_config
-            print("     Using 4-bit BNB")
-        else:
-            raise ImportError("BNB config required for standard LLM")
-        
-        text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
+            if bnb_llm_config:
+                text_encoder_load_kwargs["quantization_config"] = bnb_llm_config
+                print("     Using 4-bit BNB")
+            else:
+                raise ImportError("BNB config required for standard LLM")
+            
+            text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
     
     print(f"[1b] Loading Tokenizer: {llama_model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False)
@@ -287,7 +277,6 @@ def load_models(model_type, use_uncensored_llm=False):
     
     print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)")
     text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
-    # Only do manual to("cuda") if device_map isn't being used
     if "device_map" not in text_encoder_load_kwargs: 
         print("     Moving text encoder to CUDA...")
         text_encoder.to("cuda")
