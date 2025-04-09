@@ -279,9 +279,9 @@ class HiDreamSampler:
         available_model_types = list(MODEL_CONFIGS.keys())
         if not available_model_types: return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
         default_model = "fast-nf4" if "fast-nf4" in available_model_types else "fast" if "fast" in available_model_types else available_model_types[0]
-        return {"required": {"model_type": (available_model_types, {"default": default_model}),"prompt": ("STRING", {"multiline": True, "default": "..."}),"resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),"seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),}}
+        return {"required": {"model_type": (available_model_types, {"default": default_model}),"prompt": ("STRING", {"multiline": True, "default": "..."}),"fixed_resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),"seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),"override_width": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}), "override_height": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),}}
     RETURN_TYPES = ("IMAGE",); RETURN_NAMES = ("image",); FUNCTION = "generate"; CATEGORY = "HiDream"
-    def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg, **kwargs):
+    def generate(self, model_type, prompt, fixed_resolution, seed, override_steps, override_cfg, override_width, override_height, **kwargs):
         if not MODEL_CONFIGS or model_type == "error": print("HiDream Error: No models loaded."); return (torch.zeros((1, 512, 512, 3)),)
         pipe = None; config = None
         # --- Model Loading / Caching ---
@@ -317,7 +317,12 @@ class HiDreamSampler:
         if pipe is None or config is None: print("CRITICAL ERROR: Load failed."); return (torch.zeros((1, 512, 512, 3)),)
         # --- Generation Setup ---
         is_nf4_current = config.get("is_nf4", False)
-        height, width = parse_resolution(resolution)
+        
+        if override_width and override_height > 0:
+            height = override_height
+            width = override_width
+        else: height, width = parse_resolution(fixed_resolution)
+
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
@@ -371,6 +376,7 @@ class HiDreamSampler:
             import traceback
             traceback.print_exc()
             return (torch.zeros((1, height, width, 3)),)
+        
 # --- Node Mappings ---
 NODE_CLASS_MAPPINGS = {"HiDreamSampler": HiDreamSampler}; NODE_DISPLAY_NAME_MAPPINGS = {"HiDreamSampler": "HiDream Sampler (NF4/FP8/BNB)"}
 print("-" * 50 + "\nHiDream Sampler Node Initialized\nAvailable Models: " + str(list(MODEL_CONFIGS.keys())) + "\n" + "-" * 50) # Compact print
