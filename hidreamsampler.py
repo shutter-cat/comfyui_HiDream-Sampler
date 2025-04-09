@@ -61,14 +61,16 @@ def load_models(model_type):
     
     tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
         LLAMA_MODEL_NAME,
-        use_fast=False)
+        use_fast=False
+    )
     
+    # Load 4-bit quantized LLaMA
     text_encoder_4 = LlamaForCausalLM.from_pretrained(
         LLAMA_MODEL_NAME,
         output_hidden_states=True,
         output_attentions=True,
         low_cpu_mem_usage=True,
-        device_map="auto",
+        device_map="auto",  # allow HF to scatter this properly
         quantization_config=TransformersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
@@ -76,6 +78,7 @@ def load_models(model_type):
         attn_implementation="eager"
     )
     
+    # Load 4-bit quantized transformer
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
         pretrained_model_name_or_path, 
         subfolder="transformer",
@@ -85,8 +88,17 @@ def load_models(model_type):
         torch_dtype=torch.bfloat16
     )
 
+    # Patch the pipeline to make sure it moves inputs to the right device
+    class PatchedHiDreamPipeline(HiDreamImagePipeline):
+        def _get_clip_prompt_embeds(self, text_input_ids, **kwargs):
+            # Determine where the encoder lives
+            encoder_device = self.text_encoder_4.device
+            # Move input IDs to match
+            text_input_ids = text_input_ids.to(encoder_device)
+            # Continue with the normal flow
+            return super()._get_clip_prompt_embeds(text_input_ids, **kwargs)
 
-    pipe = HiDreamImagePipeline.from_pretrained(
+    pipe = PatchedHiDreamPipeline.from_pretrained(
         pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
@@ -94,7 +106,7 @@ def load_models(model_type):
         torch_dtype=torch.bfloat16
     )
     pipe.transformer = transformer
-    
+
     return pipe, config
 
 # Parse resolution string to get height and width
