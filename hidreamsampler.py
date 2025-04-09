@@ -235,8 +235,48 @@ def parse_resolution(resolution_str):
     except Exception as e:
         print(f"Error parsing resolution '{resolution_str}': {e}. Falling back to 1024x1024.")
         return 1024, 1024
-def pil2tensor(image: Image.Image): # (Keep function the same)
-    if image is None: return None; return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
+def pil2tensor(image: Image.Image):
+    """Convert PIL image to tensor with better error handling"""
+    if image is None:
+        print("pil2tensor: Image is None")
+        return None
+    
+    try:
+        # Debug image properties
+        print(f"pil2tensor: Image mode={image.mode}, size={image.size}")
+        
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            print(f"Converting image from {image.mode} to RGB")
+            image = image.convert('RGB')
+        
+        # Convert to numpy array with explicit steps
+        np_array = np.array(image)
+        print(f"Numpy array shape={np_array.shape}, dtype={np_array.dtype}")
+        
+        # Convert to float32 and normalize
+        np_array = np_array.astype(np.float32) / 255.0
+        
+        # Convert to tensor and add batch dimension
+        tensor = torch.from_numpy(np_array)
+        tensor = tensor.unsqueeze(0)
+        print(f"Final tensor shape={tensor.shape}")
+        
+        return tensor
+    except Exception as e:
+        print(f"Error in pil2tensor: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Try ComfyUI's own conversion if ours fails
+        try:
+            print("Trying ComfyUI's own conversion...")
+            tensor = comfy.utils.pil2tensor(image)
+            print(f"ComfyUI conversion successful: {tensor.shape}")
+            return tensor
+        except Exception as e2:
+            print(f"ComfyUI conversion also failed: {e2}")
+            return None
 # --- ComfyUI Node Definition ---
 class HiDreamSampler:
     _model_cache = {}
