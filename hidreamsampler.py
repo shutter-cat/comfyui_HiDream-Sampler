@@ -73,7 +73,6 @@ except ImportError as e:
 # --- Model Paths ---
 ORIGINAL_MODEL_PREFIX = "HiDream-ai"
 NF4_MODEL_PREFIX = "azaneko"
-FP8_MODEL_PATH = "shuttleai/HiDream-I1-Full-FP8" # Specific path for FP8 version
 ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" # For original/FP8
 NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4" # For NF4
 # --- Model Configurations ---
@@ -97,13 +96,6 @@ MODEL_CONFIGS = {
         "guidance_scale": 0.0, "num_inference_steps": 16, "shift": 3.0,
         "scheduler_class": "FlashFlowMatchEulerDiscreteScheduler",
         "is_nf4": True, "is_fp8": False, "requires_bnb": False, "requires_gptq_deps": True
-    },
-     # --- FP8 Model ---
-    "full-fp8": {
-        "path": FP8_MODEL_PATH,
-        "guidance_scale": 5.0, "num_inference_steps": 50, "shift": 3.0,
-        "scheduler_class": "FlowUniPCMultistepScheduler",
-        "is_nf4": False, "is_fp8": True, "requires_bnb": True, "requires_gptq_deps": False # LLM still uses BNB
     },
     # --- Original/BNB Models ---
      "full": {
@@ -156,15 +148,14 @@ def load_models(model_type):
     if not hidream_classes_loaded: raise ImportError("Cannot load models: HiDream classes failed to import.")
     if model_type not in MODEL_CONFIGS: raise ValueError(f"Unknown or incompatible model_type: {model_type}")
     config = MODEL_CONFIGS[model_type]
-    model_path = config["path"]; is_nf4 = config.get("is_nf4", False); is_fp8 = config.get("is_fp8", False)
+    model_path = config["path"]; is_nf4 = config.get("is_nf4", False)
     scheduler_name = config["scheduler_class"]; shift = config["shift"]
     requires_bnb = config.get("requires_bnb", False); requires_gptq_deps = config.get("requires_gptq_deps", False)
     if requires_bnb and not bnb_available: raise ImportError(f"Model '{model_type}' requires BitsAndBytes...")
     if requires_gptq_deps and (not optimum_available or not autogptq_available): raise ImportError(f"Model '{model_type}' requires Optimum & AutoGPTQ...")
     print(f"--- Loading Model Type: {model_type} ---"); print(f"Model Path: {model_path}")
-    print(f"NF4: {is_nf4}, FP8: {is_fp8}, Requires BNB: {requires_bnb}, Requires GPTQ deps: {requires_gptq_deps}")
+    print(f"NF4: {is_nf4}, Requires BNB: {requires_bnb}, Requires GPTQ deps: {requires_gptq_deps}")
     start_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"(Start VRAM: {start_mem:.2f} MB)")
-    
     # --- 1. Load LLM (Conditional) ---
     text_encoder_load_kwargs = {"output_hidden_states": True, "low_cpu_mem_usage": True, "torch_dtype": model_dtype,}
     if is_nf4:
@@ -180,92 +171,18 @@ def load_models(model_type):
     print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)"); text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
     if "device_map" not in text_encoder_load_kwargs: print("     Moving text encoder to CUDA..."); text_encoder.to("cuda")
     step1_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Text encoder loaded! (VRAM: {step1_mem:.2f} MB)")
-    
     # --- 2. Load Transformer (Conditional) ---
-    print(f"\n[2] Preparing Transformer from: {model_path}")
-    transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
-    
-    if is_fp8:
-        print("     Type: FP8 (Special loading mode)")
-        try:
-            # First approach: Try normal loading with ignore_mismatched_sizes=True
-            print("     Attempt 1: Loading with ignore_mismatched_sizes=True...")
-            transformer_fp8_kwargs = {
-                "subfolder": "transformer",
-                "torch_dtype": torch.float16,  # Try float16 instead of bfloat16
-                "low_cpu_mem_usage": True,
-                "ignore_mismatched_sizes": True  # Key parameter to ignore issues
-            }
-            
-            transformer = HiDreamImageTransformer2DModel.from_pretrained(
-                model_path, 
-                **transformer_fp8_kwargs
-            )
-            print("     Success! Loaded with ignore_mismatched_sizes=True")
-            
-        except Exception as e1:
-            print(f"     First attempt failed: {e1}")
-            
-            # Second approach: Manual config and loading
-            try:
-                print("     Attempt 2: Manual loading with from_config...")
-                # Use from_config instead of _from_config
-                config_file = huggingface_hub.hf_hub_download(
-                    repo_id=model_path, 
-                    filename="transformer/config.json"
-                )
-                
-                # Create model from config
-                from transformers import PretrainedConfig
-                model_config = PretrainedConfig.from_json_file(config_file)
-                
-                # Use from_config instead of _from_config
-                transformer = HiDreamImageTransformer2DModel.from_config(model_config)
-                
-                # Find and load weights
-                try:
-                    weights_file = huggingface_hub.hf_hub_download(
-                        repo_id=model_path, 
-                        filename="transformer/diffusion_pytorch_model.safetensors"
-                    )
-                    state_dict = load_file(weights_file)
-                except Exception as e:
-                    print(f"     Failed to load safetensors: {e}")
-                    weights_file = huggingface_hub.hf_hub_download(
-                        repo_id=model_path, 
-                        filename="transformer/diffusion_pytorch_model.bin"
-                    )
-                    state_dict = torch.load(weights_file, map_location="cpu")
-                
-                # Load state dict with strict=False to skip missing parameters
-                transformer.load_state_dict(state_dict, strict=False)
-                print("     Success! Loaded with from_config and strict=False")
-                
-            except Exception as e2:
-                print(f"     Second attempt failed: {e2}")
-                import traceback
-                traceback.print_exc()
-                
-                # If everything failed, suggest using a different model
-                print("     ⚠️ FP8 model failed to load. Please try a different model type.")
-                print("     Consider using NF4 models (fast-nf4, full-nf4) instead.")
-                raise ValueError(f"Could not load FP8 model: {e1}. Second attempt: {e2}")
-    elif is_nf4:
-        print("     Type: NF4")
-        transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
-    else:
-        # Default BNB case
+    print(f"\n[2] Preparing Transformer from: {model_path}"); transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
+    if is_nf4: print("     Type: NF4")
+    else: # Default BNB case
         print("     Type: Standard (Applying 4-bit BNB quantization)")
         if bnb_transformer_4bit_config:
             transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
         else:
             raise ImportError("BNB config required for transformer but unavailable.")
-        transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
-    
-    print("     Moving Transformer to CUDA...")
-    transformer.to("cuda")
-    step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
-    print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
+    print("     Loading Transformer... (May download files)"); transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
+    print("     Moving Transformer to CUDA..."); transformer.to("cuda")
+    step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
     # --- 3. Load Scheduler ---
     print(f"\n[3] Preparing Scheduler: {scheduler_name}"); scheduler = get_scheduler_instance(scheduler_name, shift); print(f"     Using Scheduler: {scheduler_name}")
     # --- 4. Load Pipeline ---
@@ -284,6 +201,7 @@ def load_models(model_type):
         else: print("     ⚠️ enable_sequential_cpu_offload() not found.")
     final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
     return pipe, config
+    
 # --- Resolution Parsing & Tensor Conversion ---
 RESOLUTION_OPTIONS = [ # (Keep list the same)
     "1024 × 1024 (Square)","768 × 1360 (Portrait)","1360 × 768 (Landscape)",
