@@ -186,11 +186,14 @@ class HiDreamSampler:
             # Store original device for later
             original_text_encoder_device = pipe.text_encoder_4.device
             
-            # Get prompt embeddings
+            # Get prompt embeddings - for HiDream, we need to pass the same prompt to all 4 slots
             with torch.no_grad():
-                # Use the pipeline's encode_prompt method to get the embeddings
+                # Call encode_prompt with all 4 required prompts (same prompt for all)
                 prompt_embeds, pooled_prompt_embeds = pipe.encode_prompt(
-                    prompt=prompt,
+                    prompt=prompt,          # Primary prompt
+                    prompt_2=prompt,        # Secondary prompt
+                    prompt_3=prompt,        # Tertiary prompt
+                    prompt_4=prompt,        # Quaternary prompt
                     num_images_per_prompt=1,
                     do_classifier_free_guidance=guidance_scale > 0.0
                 )
@@ -227,7 +230,7 @@ class HiDreamSampler:
             print("[HiDream Node] Running generation with LLM on GPU...")
             
             output_images = pipe(
-                prompt=prompt,
+                prompt=prompt,          # HiDream will internally pass this to all 4 encoders
                 height=height,
                 width=width,
                 guidance_scale=guidance_scale,
