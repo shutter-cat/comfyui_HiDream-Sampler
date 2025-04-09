@@ -412,19 +412,93 @@ class HiDreamSampler:
     CATEGORY = "HiDream"
 
     def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg, **kwargs):
-        # ... (Setup logic before inference remains the same) ...
+
+        # Handle case where no models were available from INPUT_TYPES
+        if not MODEL_CONFIGS or model_type == "error":
+             print("HiDream Sampler Error: Node cannot operate, no compatible models found or loaded.")
+             blank_image = torch.zeros((1, 512, 512, 3), dtype=torch.float32) # Use default size
+             return (blank_image,)
+
+        pipe = None
+        config = None
+        # --- Model Loading / Caching ---
+        # (Keep the caching logic the same as the previous version)
+        if model_type in self._model_cache:
+            print(f"Checking cached model for {model_type}...")
+            pipe, config = self._model_cache[model_type]
+            valid_cache = True
+            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: # Added config check
+                 valid_cache = False; print(f"Cached model for {model_type} seems invalid/unloaded. Reloading...")
+                 if model_type in self._model_cache: del self._model_cache[model_type]
+                 pipe, config = None, None # Force reload
+            if valid_cache: print(f"Using valid cached model for {model_type}.")
+
+        if pipe is None:
+             if self._model_cache:
+                  print(f"Clearing ALL cached models before loading {model_type}...")
+                  # (Keep cache clearing logic the same)
+                  keys_to_del = list(self._model_cache.keys())
+                  for key in keys_to_del: # ... (same loop) ...
+                      print(f"  Removing '{key}' from cache...")
+                      try: # ... (same try/except) ...
+                          pipe_to_del, _ = self._model_cache.pop(key)
+                          if hasattr(pipe_to_del, 'transformer'): del pipe_to_del.transformer
+                          if hasattr(pipe_to_del, 'text_encoder_4'): del pipe_to_del.text_encoder_4
+                          del pipe_to_del
+                      except Exception as del_e: print(f"  Error deleting cached model components for {key}: {del_e}")
+                  gc.collect(); # Force GC
+                  if torch.cuda.is_available(): torch.cuda.empty_cache()
+                  print("Cache cleared.")
+
+             print(f"Loading model for {model_type}...")
+             try: # ... (same try/except) ...
+                 pipe, config = load_models(model_type)
+                 self._model_cache[model_type] = (pipe, config)
+                 print(f"Model for {model_type} loaded and cached successfully!")
+             except Exception as e: # ... (same error handling) ...
+                 print(f"!!! ERROR loading model {model_type}: {e}")
+                 if model_type in self._model_cache: del self._model_cache[model_type]
+                 import traceback; traceback.print_exc()
+                 blank_image = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+                 return (blank_image,)
+
+        # --- Generation Setup ---
+        if pipe is None or config is None: # Ensure config was loaded
+            print("CRITICAL ERROR: Pipeline or config is None after loading attempt.")
+            blank_image = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+            return (blank_image,)
+
+        # *** DEFINE variables needed BEFORE the try block ***
+        is_nf4_current = config.get("is_nf4", False)
+        height, width = parse_resolution(resolution) # Define height/width early
+        num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
+        guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
+        pbar = comfy.utils.ProgressBar(num_inference_steps) # Define pbar early
+        def progress_callback(step, timestep, latents): pbar.update(1) # Define callback here too
+
+        try: # Use comfy's helper to get the primary compute device
+            inference_device = comfy.model_management.get_torch_device()
+        except Exception as e:
+             print(f"Warning: Could not get device via comfy.model_management ({e}). Falling back.")
+             inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        print(f"Creating Generator on device: {inference_device}")
+        generator = torch.Generator(device=inference_device).manual_seed(seed)
+
+        print(f"\n--- Starting Generation ---")
+        print(f"Model: {model_type}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
 
         # --- Run Inference ---
         output_images = None
         try:
-             if not is_nf4_current:
+             if not is_nf4_current: # Use the correctly defined variable
                  print(f"Ensuring pipeline is on device: {inference_device} (Offload NOT enabled)")
                  pipe.to(inference_device)
              else:
                  print(f"Skipping pipe.to({inference_device}) because sequential CPU offload is enabled.")
 
              with torch.inference_mode():
-                 # *** REMOVED callback_steps=1 from this call ***
+                 # Removed callback_steps=1
                  output_images = pipe(
                      prompt=prompt,
                      height=height,
@@ -435,23 +509,24 @@ class HiDreamSampler:
                      generator=generator,
                      callback=progress_callback, # Keep callback
                  ).images
-        except Exception as e: # ... (same error handling) ...
+        except Exception as e: # Handle errors during inference
              print(f"!!! ERROR during pipeline execution: {e}")
-             # Add check for the specific TypeError we just saw
              if isinstance(e, TypeError) and 'unexpected keyword argument' in str(e):
                   print("Hint: Check if the arguments passed to the pipe() call match the pipeline's definition.")
              import traceback; traceback.print_exc()
+             # height/width are defined now, safe to use here
              blank_image = torch.zeros((1, height, width, 3), dtype=torch.float32)
              return (blank_image,)
         finally:
+            # pbar is defined now, safe to use here
             pbar.update_absolute(num_inference_steps)
 
         print("--- Generation Complete ---")
 
         # --- Convert to ComfyUI Tensor ---
-        # (Keep tensor conversion the same)
-        if not output_images: # ... (same check) ...
+        if not output_images:
              print("[HiDream Node] ERROR: No images returned from pipeline.")
+             # height/width are defined now
              blank_image = torch.zeros((1, height, width, 3), dtype=torch.float32)
              return (blank_image,)
 
