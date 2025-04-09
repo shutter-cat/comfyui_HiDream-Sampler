@@ -168,7 +168,8 @@ def load_models(model_type):
                 total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 # Use 75% of available GPU memory
                 max_mem = int(total_mem * 0.75)
-                text_encoder_load_kwargs["max_memory"] = {"cuda:0": f"{max_mem}GiB"}
+                # Use integer 0 instead of "cuda:0" - this was causing the error
+                text_encoder_load_kwargs["max_memory"] = {0: f"{max_mem}GiB"}
                 print(f"     Setting max memory limit: {max_mem}GiB of {total_mem:.1f}GiB")
             text_encoder_load_kwargs["device_map"] = "auto"
             print("     Using device_map='auto'")
@@ -510,7 +511,12 @@ class HiDreamSampler:
                 print(f"ERROR: Invalid tensor shape {output_tensor.shape}. Creating blank image.")
                 return (torch.zeros((1, height, width, 3)),)
                 
-            print(f"Output tensor shape: {output_tensor.shape}")
+            print(f"Output tensor shape: {output_tensor.shape}, dtype: {output_tensor.dtype}")
+            
+            # Fix for BFloat16 tensor issue
+            if output_tensor.dtype == torch.bfloat16:
+                print("Converting bfloat16 tensor to float32 for ComfyUI compatibility")
+                output_tensor = output_tensor.to(torch.float32)
             
             # After generating the image, try to clean up any temporary memory
             try:
