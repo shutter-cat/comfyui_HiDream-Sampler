@@ -1,21 +1,20 @@
 # -*- coding: utf-8 -*-
 # HiDream Sampler Node for ComfyUI
-# Version: 2024-07-29c (NF4/FP8/BNB Support, Final Call Arg Fix)
+# Version: 2024-07-29c (NF4/BNB Support, Uncensored Option)
 #
 # Required Dependencies:
 # - transformers, diffusers, torch, numpy, Pillow
 # - For NF4 models: optimum, accelerate, auto-gptq (`pip install optimum accelerate auto-gptq`)
-# - For non-NF4/FP8 models (4-bit): bitsandbytes (`pip install bitsandbytes`)
+# - For non-NF4 models (4-bit): bitsandbytes (`pip install bitsandbytes`)
 # - Ensure hi_diffusers library is locally available or hdi1 package is installed.
 import torch
 import numpy as np
 from PIL import Image
-import comfy.model_management # Ensure this is imported
+import comfy.model_management 
 import comfy.utils
 import gc
-import os # For checking paths if needed
-import huggingface_hub
-from safetensors.torch import load_file
+import os 
+
 # --- Optional Dependency Handling ---
 try:
     import accelerate
@@ -28,30 +27,26 @@ try:
     autogptq_available = True
 except ImportError:
     autogptq_available = False
-    # Note: Optimum might still load GPTQ without auto-gptq if using ExLlama kernels,
-    # but it's often required. Add a warning if NF4 models are selected later.
 try:
     import optimum
     optimum_available = True
 except ImportError:
     optimum_available = False
-    # Add a warning if NF4 models are selected later.
 try:
     from transformers import BitsAndBytesConfig as TransformersBitsAndBytesConfig
     from diffusers import BitsAndBytesConfig as DiffusersBitsAndBytesConfig
     bnb_available = True
 except ImportError:
-    # This case was handled before, just confirm variable state
     bnb_available = False
     TransformersBitsAndBytesConfig = None
     DiffusersBitsAndBytesConfig = None
     print("Warning: bitsandbytes not installed. 4-bit BNB quantization will not be available.")
+
 # --- Core Imports ---
-from transformers import LlamaForCausalLM, AutoTokenizer # Use AutoTokenizer
+from transformers import LlamaForCausalLM, AutoTokenizer
+
 # --- HiDream Specific Imports ---
-# Attempt local import first, then fallback (which might fail)
 try:
-    # Assuming hi_diffusers is cloned into this custom_node's directory
     from .hi_diffusers.models.transformers.transformer_hidream_image import HiDreamImageTransformer2DModel
     from .hi_diffusers.pipelines.hidream_image.pipeline_hidream_image import HiDreamImagePipeline
     from .hi_diffusers.schedulers.fm_solvers_unipc import FlowUniPCMultistepScheduler
@@ -64,27 +59,29 @@ except ImportError as e:
     print("or hdi1 package is installed in the ComfyUI environment.")
     print("Node may fail to load models.")
     print("--------------------------------------------------------------------")
-    # Define placeholders so the script doesn't crash immediately
     HiDreamImageTransformer2DModel = None
     HiDreamImagePipeline = None
     FlowUniPCMultistepScheduler = None
     FlashFlowMatchEulerDiscreteScheduler = None
     hidream_classes_loaded = False
+
 # --- Model Paths ---
 ORIGINAL_MODEL_PREFIX = "HiDream-ai"
 NF4_MODEL_PREFIX = "azaneko"
-ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" # For original/FP8
-NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4" # For NF4
+ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1"
+NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
+# Add uncensored model
 UNCENSORED_LLAMA_MODEL_NAME = "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated"
-UNCENSORED_NF4_LLAMA_MODEL_NAME = "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated" 
+# We'll use the same uncensored model for both and handle quantization in code
+UNCENSORED_NF4_LLAMA_MODEL_NAME = "mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated"
+
 # --- Model Configurations ---
-# Added flags for dependency checks
 MODEL_CONFIGS = {
     # --- NF4 Models ---
     "full-nf4": {
         "path": f"{NF4_MODEL_PREFIX}/HiDream-I1-Full-nf4",
         "guidance_scale": 5.0, "num_inference_steps": 50, "shift": 3.0,
-        "scheduler_class": "FlowUniPCMultistepScheduler", # Use string names for dynamic import
+        "scheduler_class": "FlowUniPCMultistepScheduler",
         "is_nf4": True, "is_fp8": False, "requires_bnb": False, "requires_gptq_deps": True
     },
     "dev-nf4": {
@@ -119,8 +116,8 @@ MODEL_CONFIGS = {
         "is_nf4": False, "is_fp8": False, "requires_bnb": True, "requires_gptq_deps": False
     }
 }
+
 # --- Filter models based on available dependencies ---
-# (Keep filtering logic the same)
 original_model_count = len(MODEL_CONFIGS)
 if not bnb_available: MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_bnb", False)}
 if not optimum_available or not autogptq_available: MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_gptq_deps", False)}
@@ -128,23 +125,82 @@ if not hidream_classes_loaded: MODEL_CONFIGS = {}
 filtered_model_count = len(MODEL_CONFIGS)
 if filtered_model_count == 0: print("*"*70 + "\nCRITICAL ERROR: No HiDream models available...\n" + "*"*70)
 elif filtered_model_count < original_model_count: print("*"*70 + "\nWarning: Some HiDream models disabled...\n" + "*"*70)
+
 # Define BitsAndBytes configs (if available)
-# (Keep definitions the same)
 bnb_llm_config = None; bnb_transformer_4bit_config = None
 if bnb_available: bnb_llm_config = TransformersBitsAndBytesConfig(load_in_4bit=True); bnb_transformer_4bit_config = DiffusersBitsAndBytesConfig(load_in_4bit=True)
 model_dtype = torch.bfloat16
+
 # Get available scheduler classes
-# (Keep definitions the same)
 available_schedulers = {};
 if hidream_classes_loaded: available_schedulers = {"FlowUniPCMultistepScheduler": FlowUniPCMultistepScheduler, "FlashFlowMatchEulerDiscreteScheduler": FlashFlowMatchEulerDiscreteScheduler}
+
 # --- Helper: Get Scheduler Instance ---
-# (Keep function the same)
 def get_scheduler_instance(scheduler_name, shift_value):
     if not available_schedulers: raise RuntimeError("No schedulers available...")
     scheduler_class = available_schedulers.get(scheduler_name)
     if scheduler_class is None: raise ValueError(f"Scheduler class '{scheduler_name}' not found...")
     return scheduler_class(num_train_timesteps=1000, shift=shift_value, use_dynamic_shifting=False)
-# --- Loading Function (Handles NF4 and default BNB) ---
+
+# --- Resolution Parsing & Tensor Conversion ---
+RESOLUTION_OPTIONS = [ 
+    "1024 × 1024 (Square)","768 × 1360 (Portrait)","1360 × 768 (Landscape)",
+    "880 × 1168 (Portrait)","1168 × 880 (Landscape)","1248 × 832 (Landscape)",
+    "832 × 1248 (Portrait)"
+]
+
+def parse_resolution(resolution_str):
+    """Parse resolution string into height and width dimensions."""
+    try:
+        res_part = resolution_str.split(" (")[0].strip()
+        parts = res_part.replace('x', '×').split("×")
+        if len(parts) != 2:
+            raise ValueError(f"Expected format 'width × height', got '{res_part}'")
+        width_str = parts[0].strip()
+        height_str = parts[1].strip()
+        width = int(width_str)
+        height = int(height_str)
+        print(f"Successfully parsed resolution: {width}x{height}")
+        return height, width
+    except Exception as e:
+        print(f"Error parsing resolution '{resolution_str}': {e}. Falling back to 1024x1024.")
+        return 1024, 1024
+
+def pil2tensor(image: Image.Image):
+    """Convert PIL image to tensor with better error handling"""
+    if image is None:
+        print("pil2tensor: Image is None")
+        return None
+    try:
+        # Debug image properties
+        print(f"pil2tensor: Image mode={image.mode}, size={image.size}")
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            print(f"Converting image from {image.mode} to RGB")
+            image = image.convert('RGB')
+        # Convert to numpy array with explicit steps
+        np_array = np.array(image)
+        print(f"Numpy array shape={np_array.shape}, dtype={np_array.dtype}")
+        # Convert to float32 and normalize
+        np_array = np_array.astype(np.float32) / 255.0
+        # Convert to tensor and add batch dimension
+        tensor = torch.from_numpy(np_array)
+        tensor = tensor.unsqueeze(0)
+        print(f"Final tensor shape={tensor.shape}")
+        return tensor
+    except Exception as e:
+        print(f"Error in pil2tensor: {e}")
+        import traceback
+        traceback.print_exc()
+        # Try ComfyUI's own conversion if ours fails
+        try:
+            print("Trying ComfyUI's own conversion...")
+            tensor = comfy.utils.pil2tensor(image)
+            print(f"ComfyUI conversion successful: {tensor.shape}")
+            return tensor
+        except Exception as e2:
+            print(f"ComfyUI conversion also failed: {e2}")
+            return None
 def load_models(model_type, use_uncensored_llm=False):
     if not hidream_classes_loaded: raise ImportError("Cannot load models: HiDream classes failed to import.")
     if model_type not in MODEL_CONFIGS: raise ValueError(f"Unknown or incompatible model_type: {model_type}")
