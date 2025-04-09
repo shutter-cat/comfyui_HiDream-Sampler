@@ -1,9 +1,8 @@
 import torch
 import numpy as np
 from PIL import Image
-import comfy.model_management as mm
-import comfy.utils
-import gc
+# import comfy.model_management as mm # Not using manual management here
+import comfy.utils # Keep for progress bar potentially
 
 # Diffusers/Transformers imports
 from .hi_diffusers.models.transformers.transformer_hidream_image import HiDreamImageTransformer2DModel
@@ -28,7 +27,7 @@ MODEL_CONFIGS = {
         "num_inference_steps": 28,
         "shift": 6.0,
         "scheduler_class": FlashFlowMatchEulerDiscreteScheduler,
-        "is_fp8": False # Flag to indicate if it's FP8
+        "is_fp8": False
     },
     "full": {
         "path": f"{MODEL_PREFIX}/HiDream-I1-Full",
@@ -43,7 +42,7 @@ MODEL_CONFIGS = {
         "guidance_scale": 5.0, # Assuming same params as 'full'
         "num_inference_steps": 50,
         "shift": 3.0,
-        "scheduler_class": FlowUniPCMultistepScheduler,
+        "scheduler_class": FlowUniPCMultistepScheduler, # Assuming same scheduler
         "is_fp8": True # Mark this as FP8
     },
     "fast": {
@@ -67,48 +66,113 @@ RESOLUTION_OPTIONS = [
     "832 × 1248 (Portrait)"
 ]
 
-# Define BitsAndBytes configs *outside* loading functions to avoid recreation
-# We only need the LLM one now if we don't quantize the FP8 transformer
-# bnb_transformer_config = DiffusersBitsAndBytesConfig(load_in_4bit=True) # Only for non-FP8
+# Define BitsAndBytes configs
 bnb_llm_config = TransformersBitsAndBytesConfig(load_in_4bit=True)
-model_dtype = torch.bfloat16 # bfloat16 is often used alongside FP8
+bnb_transformer_4bit_config = DiffusersBitsAndBytesConfig(load_in_4bit=True) # For non-FP8 transformers
+model_dtype = torch.bfloat16 # Keep bfloat16
+
+# Load models - Reverted to original structure + FP8 condition
+def load_models(model_type):
+    config = MODEL_CONFIGS[model_type]
+    pretrained_model_name_or_path = config["path"]
+    is_fp8_transformer = config.get("is_fp8", False)
+
+    # Select the correct scheduler class from config
+    scheduler_class = config["scheduler_class"]
+    scheduler = scheduler_class(
+        num_train_timesteps=1000, # Or get from model config if available
+        shift=config["shift"],
+        use_dynamic_shifting=False # Or get from config
+    )
+
+    print(f"[HiDream Node] Loading Tokenizer: {LLAMA_MODEL_NAME}")
+    tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
+        LLAMA_MODEL_NAME,
+        use_fast=False)
+
+    print(f"[HiDream Node] Loading 4-bit LLM Text Encoder: {LLAMA_MODEL_NAME}")
+    text_encoder_4 = LlamaForCausalLM.from_pretrained(
+        LLAMA_MODEL_NAME,
+        output_hidden_states=True,
+        # output_attentions=True, # Keep disabled unless needed
+        low_cpu_mem_usage=True,
+        quantization_config=bnb_llm_config, # Use 4-bit for LLM
+        torch_dtype=model_dtype,
+        attn_implementation="flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
+        ).to("cuda") # Original placement
+
+    # --- Conditional Transformer Loading ---
+    transformer_load_kwargs = {
+        "subfolder": "transformer",
+        "torch_dtype": model_dtype,
+        "low_cpu_mem_usage": True
+    }
+    if is_fp8_transformer:
+        print(f"[HiDream Node] Loading FP8 Diffusion Transformer: {pretrained_model_name_or_path}")
+        # NO quantization_config for FP8
+    else:
+        print(f"[HiDream Node] Loading 4-bit Diffusion Transformer: {pretrained_model_name_or_path}")
+        transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config # Apply 4-bit config
+
+    transformer = HiDreamImageTransformer2DModel.from_pretrained(
+        pretrained_model_name_or_path,
+        **transformer_load_kwargs
+    ).to("cuda") # Original placement
+
+    # --- Pipeline Loading (Original Structure) ---
+    # Pass the correct model path here too
+    print(f"[HiDream Node] Loading Pipeline: {pretrained_model_name_or_path}")
+    pipe = HiDreamImagePipeline.from_pretrained(
+        pretrained_model_name_or_path,
+        scheduler=scheduler,
+        tokenizer_4=tokenizer_4,
+        text_encoder_4=text_encoder_4,
+        torch_dtype=model_dtype
+        # Note: If the FP8 model needs specific variant flags (like variant='fp8'),
+        # they might need to be passed here too if the pipeline doesn't infer it.
+        # Let's try without first.
+    ).to("cuda", model_dtype) # Original placement
+
+    # Overwrite the pipeline's transformer with the one we explicitly loaded
+    # (ensures correct quantization/FP8 is used)
+    print("[HiDream Node] Assigning explicitly loaded transformer to pipeline.")
+    pipe.transformer = transformer
+
+    return pipe, config
 
 # Parse resolution string to get height and width
 def parse_resolution(resolution_str):
-    parts = resolution_str.split(" (")[0].split(" × ")
-    try:
-        p_width = int(parts[0].strip())
-        p_height = int(parts[1].strip())
-        width = p_width
-        height = p_height
-        print(f"[HiDream Node] Parsed Resolution: Width={width}, Height={height}")
-        return height, width # Return Height, Width
-    except Exception as e:
-        print(f"[HiDream Node] Error parsing resolution '{resolution_str}': {e}. Falling back to 1024x1024.")
-        return 1024, 1024
+    # Reverted to simpler original logic, assuming W x H in string -> H, W for function return
+    if "1024 × 1024" in resolution_str: return 1024, 1024
+    elif "768 × 1360" in resolution_str: return 1360, 768 # H, W
+    elif "1360 × 768" in resolution_str: return 768, 1360 # H, W
+    elif "880 × 1168" in resolution_str: return 1168, 880 # H, W
+    elif "1168 × 880" in resolution_str: return 880, 1168 # H, W
+    elif "1248 × 832" in resolution_str: return 832, 1248 # H, W
+    elif "832 × 1248" in resolution_str: return 1248, 832 # H, W
+    else: return 1024, 1024
 
 def pil2tensor(image: Image.Image):
     if image is None: return None
     return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
 
-# --- ComfyUI Node Definition ---
+# --- ComfyUI Node Definition (Original Structure) ---
 class HiDreamSampler:
+
+    _model_cache = {} # Keep original caching mechanism
 
     @classmethod
     def INPUT_TYPES(s):
-        # Update the model_type list to include 'full-fp8'
         model_type_options = list(MODEL_CONFIGS.keys())
         default_model = "fast" if "fast" in model_type_options else model_type_options[0]
-
         return {
             "required": {
-                # Use the updated list including 'full-fp8'
-                "model_type": (model_type_options, {"default": default_model}),
+                "model_type": (model_type_options, {"default": default_model}), # Includes 'full-fp8'
                 "prompt": ("STRING", {"multiline": True, "default": "A photo of an astronaut riding a horse on the moon"}),
                 "resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
-                "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), # Use wider seed range
+                 "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
+                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
             }
         }
 
@@ -119,150 +183,79 @@ class HiDreamSampler:
 
     def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg):
 
-        # --- Get Config ---
-        if model_type not in MODEL_CONFIGS:
-            raise ValueError(f"Invalid model_type: {model_type}")
-        config = MODEL_CONFIGS[model_type]
-        hidream_model_path = config["path"]
-        is_fp8_transformer = config.get("is_fp8", False) # Check if loading FP8 version
+        # Load or retrieve cached model (Original Caching Logic)
+        if model_type not in self._model_cache:
+            print(f"Loading model for {model_type}...")
+            try:
+                pipe, config = load_models(model_type)
+                self._model_cache[model_type] = (pipe, config)
+                print(f"Model for {model_type} cached successfully!")
+            except Exception as e:
+                print(f"!!! ERROR loading model {model_type}: {e}")
+                # Clear cache entry if loading failed
+                if model_type in self._model_cache: del self._model_cache[model_type]
+                import traceback
+                traceback.print_exc()
+                # Re-raise or return error state? Re-raising for now.
+                raise e # Propagate error to ComfyUI
+        else:
+            print(f"Using cached model for {model_type}")
+            pipe, config = self._model_cache[model_type] # Get from cache
 
         # --- Parse Inputs ---
-        height, width = parse_resolution(resolution)
+        # Get config *again* from dict in case it wasn't cached (or use cached one)
+        # This seems slightly redundant with the caching but matches original structure closer
+        config_from_dict = MODEL_CONFIGS[model_type]
+        height, width = parse_resolution(resolution) # Returns H, W
 
+        # Use config from cache/load for steps/cfg defaults
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
 
-        # --- Handle Seed & Device ---
-        device = mm.get_torch_device()
+        # --- Handle Seed ---
+        # Ensure generator is on CUDA if pipe is on CUDA
+        device = pipe.device # Get device from the loaded pipeline
         generator = torch.Generator(device=device).manual_seed(seed)
 
-        # --- Initialize variables ---
-        text_encoder, tokenizer, transformer, scheduler, pipe, prompt_embeds = None, None, None, None, None, None
+        print(f"[HiDream Node] Starting generation: H={height}, W={width}, Steps={num_inference_steps}, CFG={guidance_scale}, Seed={seed}")
+        # Add progress bar using comfy.utils
+        pbar = comfy.utils.ProgressBar(num_inference_steps)
+        def progress_callback(step, timestep, latents):
+            pbar.update(1)
 
-        try:
-            # --- Step 1: Load Text Encoder and Tokenizer ---
-            print(f"[HiDream Node] Stage 1: Loading LLM Text Encoder ({LLAMA_MODEL_NAME})")
-            tokenizer = PreTrainedTokenizerFast.from_pretrained(LLAMA_MODEL_NAME, use_fast=False)
-            text_encoder = LlamaForCausalLM.from_pretrained(
-                LLAMA_MODEL_NAME,
-                output_hidden_states=True,
-                low_cpu_mem_usage=True,
-                quantization_config=bnb_llm_config, # Quantize the LLM
-                torch_dtype=model_dtype,
-                attn_implementation="flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
-            )
-            try:
-                 text_encoder.to(device)
-            except Exception as move_err:
-                 print(f"[HiDream Node] Warning: Could not explicitly move text_encoder to {device}. Error: {move_err}")
-                 if next(text_encoder.parameters()).device != device:
-                      print(f"[HiDream Node] Error: Text encoder is on {next(text_encoder.parameters()).device} NOT target {device}!")
+        # --- Run Inference ---
+        # Use inference_mode or no_grad for potentially lower memory during inference itself
+        with torch.inference_mode():
+             output_images = pipe(
+                 prompt=prompt, # Using prompt, not embeds, as per original structure
+                 height=height,
+                 width=width,
+                 guidance_scale=guidance_scale,
+                 num_inference_steps=num_inference_steps,
+                 num_images_per_prompt=1,
+                 generator=generator,
+                 callback_steps = 1, # Call callback every step
+                 callback = progress_callback,
+             ).images
 
-            print(f"[HiDream Node] Text Encoder Loaded. Memory: {mm.get_model_size(text_encoder)/1e9:.2f} GB")
+        pbar.update_absolute(num_inference_steps) # Ensure bar completes
+        print("[HiDream Node] Generation Complete.")
 
-            # --- Step 2: Encode Prompt ---
-            print("[HiDream Node] Stage 2: Encoding Prompt")
-            inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True).to(device)
-            with torch.inference_mode():
-                outputs = text_encoder(**inputs, output_hidden_states=True)
-                prompt_embeds = outputs.hidden_states[-1].to(dtype=model_dtype, device=device).detach()
-            print(f"[HiDream Node] Prompt Encoded. Shape: {prompt_embeds.shape}")
+        # --- Convert to ComfyUI Tensor ---
+        if not output_images:
+             print("[HiDream Node] ERROR: No images were generated.")
+             # Return blank image to avoid breaking workflow
+             blank_image = torch.zeros((1, height, width, 3), dtype=torch.float32)
+             return (blank_image,)
 
-            # --- Step 3: Unload Text Encoder ---
-            print("[HiDream Node] Stage 3: Unloading Text Encoder")
-            del text_encoder; text_encoder = None
-            del tokenizer; tokenizer = None
-            gc.collect(); mm.soft_empty_cache()
-            # torch.cuda.empty_cache() # Optional: More forceful clear
-            print("[HiDream Node] Text Encoder Unloaded.")
-            mm.log_current_system_memory_usage()
+        output_tensor = pil2tensor(output_images[0])
 
-            # --- Step 4: Load Diffusion Model (Transformer) ---
-            transformer_load_kwargs = {
-                "subfolder": "transformer",
-                "low_cpu_mem_usage": True,
-                "torch_dtype": model_dtype,
-                # FP8 Specific flags MIGHT be needed depending on transformers/diffusers version and the model structure
-                # e.g., variant="fp8", device_map="auto"
-                # We'll try without them first.
-            }
+        # --- Model Cleanup (Implicit) ---
+        # Relying on ComfyUI's management and Python's garbage collection
+        # as we are not doing manual load/unload within generate anymore.
+        # The cache keeps the model loaded.
 
-            if is_fp8_transformer:
-                print(f"[HiDream Node] Stage 4: Loading FP8 Diffusion Transformer from {hidream_model_path}")
-                # DO NOT apply bnb_config for FP8 models
-                # Potentially add specific FP8 args here if needed:
-                # transformer_load_kwargs["variant"] = "fp8"
-            else:
-                print(f"[HiDream Node] Stage 4: Loading 4-bit Diffusion Transformer from {hidream_model_path}")
-                # Apply 4-bit quantization for non-FP8 models
-                transformer_load_kwargs["quantization_config"] = DiffusersBitsAndBytesConfig(load_in_4bit=True)
-
-            transformer = HiDreamImageTransformer2DModel.from_pretrained(
-                hidream_model_path,
-                **transformer_load_kwargs
-            )
-
-            # Manually move to device (important for FP8 if not using device_map)
-            try:
-                transformer.to(device)
-            except Exception as move_err:
-                 print(f"[HiDream Node] Warning: Could not explicitly move transformer to {device}. Error: {move_err}")
-                 if next(transformer.parameters()).device != device:
-                      print(f"[HiDream Node] Error: Transformer is on {next(transformer.parameters()).device} NOT target {device}!")
-
-            print(f"[HiDream Node] Transformer Loaded. Memory: {mm.get_model_size(transformer)/1e9:.2f} GB")
-            mm.log_current_system_memory_usage()
-
-
-            # --- Step 5: Prepare Pipeline ---
-            print("[HiDream Node] Stage 5: Preparing Pipeline")
-            scheduler_class = config["scheduler_class"]
-            scheduler = scheduler_class(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
-            pipe = HiDreamImagePipeline(transformer=transformer, scheduler=scheduler, tokenizer_4=None, text_encoder_4=None)
-            print("[HiDream Node] Pipeline Ready.")
-
-            # --- Step 6: Run Inference ---
-            print("[HiDream Node] Stage 6: Running Diffusion Inference")
-            output_images = None
-            pbar = comfy.utils.ProgressBar(num_inference_steps)
-            def progress_callback(step, timestep, latents): pbar.update(1)
-
-            with torch.inference_mode():
-                output_images = pipe(
-                    prompt_embeds=prompt_embeds, prompt=None, height=height, width=width,
-                    guidance_scale=guidance_scale, num_inference_steps=num_inference_steps,
-                    num_images_per_prompt=1, generator=generator, callback_steps=1, callback=progress_callback,
-                ).images
-            pbar.update_absolute(num_inference_steps)
-            print("[HiDream Node] Generation Complete.")
-
-        except Exception as e:
-            print(f"!!! Exception during processing !!! {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
-            print("[HiDream Node] ERROR: Exception occurred. Returning blank image.")
-            blank_image = torch.zeros((1, height if 'height' in locals() else 512, width if 'width' in locals() else 512, 3), dtype=torch.float32)
-            return (blank_image,)
-
-        finally:
-            # --- Step 7: Clean up Diffusion Model ---
-            print("[HiDream Node] Stage 7: Cleaning up Diffusion Model")
-            del pipe; del transformer; del scheduler # Delete in reverse order of creation/dependency
-            pipe, transformer, scheduler = None, None, None # Clear refs
-            gc.collect(); mm.soft_empty_cache()
-            # torch.cuda.empty_cache() # Optional
-            print("[HiDream Node] Diffusion Model Unloaded.")
-            mm.log_current_system_memory_usage()
-
-            # --- Step 8: Convert to ComfyUI Tensor ---
-            if output_images is None or len(output_images) == 0:
-                 print("[HiDream Node] ERROR: No images generated. Returning blank image.")
-                 blank_image = torch.zeros((1, height if 'height' in locals() else 512, width if 'width' in locals() else 512, 3), dtype=torch.float32)
-                 return (blank_image,)
-
-            output_tensor = pil2tensor(output_images[0])
-            return (output_tensor,)
-
+        return (output_tensor,)
 
 # --- Node Mappings ---
 NODE_CLASS_MAPPINGS = {
@@ -270,5 +263,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "HiDreamSampler": "HiDream Sampler (Mem Optimized v3 FP8)" # Updated name
+    "HiDreamSampler": "HiDream Sampler (FP8 Option)" # Updated name
 }
