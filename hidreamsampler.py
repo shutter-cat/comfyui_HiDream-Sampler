@@ -214,12 +214,27 @@ RESOLUTION_OPTIONS = [ # (Keep list the same)
     "880 × 1168 (Portrait)","1168 × 880 (Landscape)","1248 × 832 (Landscape)",
     "832 × 1248 (Portrait)"
 ]
-def parse_resolution(resolution_str): # (Keep function the same)
-    try: # ... (same parsing logic) ...
-        res_part = resolution_str.split(" (")[0]; parts = res_part.replace('x', '×').split("×")
-        if len(parts) != 2: raise ValueError("Format error."); w_str, h_str = [p.strip() for p in parts]
-        width = int(w_str); height = int(h_str); return height, width
-    except Exception as e: print(f"Error parsing resolution '{resolution_str}': {e}. Falling back."); return 1024, 1024
+def parse_resolution(resolution_str):
+    """Parse resolution string into height and width dimensions."""
+    try:
+        # Extract the resolution part before the parenthesis
+        res_part = resolution_str.split(" (")[0].strip()
+        # Replace 'x' with '×' for consistency if needed
+        parts = res_part.replace('x', '×').split("×")
+        
+        if len(parts) != 2:
+            raise ValueError(f"Expected format 'width × height', got '{res_part}'")
+            
+        width_str = parts[0].strip()
+        height_str = parts[1].strip()
+        
+        width = int(width_str)
+        height = int(height_str)
+        print(f"Successfully parsed resolution: {width}x{height}")
+        return height, width
+    except Exception as e:
+        print(f"Error parsing resolution '{resolution_str}': {e}. Falling back to 1024x1024.")
+        return 1024, 1024
 def pil2tensor(image: Image.Image): # (Keep function the same)
     if image is None: return None; return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
 # --- ComfyUI Node Definition ---
@@ -236,11 +251,11 @@ class HiDreamSampler:
         if not MODEL_CONFIGS or model_type == "error": print("HiDream Error: No models loaded."); return (torch.zeros((1, 512, 512, 3)),)
         pipe = None; config = None
         # --- Model Loading / Caching ---
-        if model_type in self._model_cache: # (Keep cache checking logic the same)
+        if model_type in self._model_cache:
             print(f"Checking cache for {model_type}..."); pipe, config = self._model_cache[model_type]; valid_cache = True
             if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: valid_cache = False; print("Invalid cache, reloading..."); del self._model_cache[model_type]; pipe, config = None, None
             if valid_cache: print("Using cached model.")
-        if pipe is None: # (Keep cache clearing logic the same)
+        if pipe is None:
             if self._model_cache:
                 print(f"Clearing ALL cache before loading {model_type}...")
                 keys_to_del = list(self._model_cache.keys())
@@ -267,8 +282,8 @@ class HiDreamSampler:
                 return (torch.zeros((1, 512, 512, 3)),)
         if pipe is None or config is None: print("CRITICAL ERROR: Load failed."); return (torch.zeros((1, 512, 512, 3)),)
         # --- Generation Setup ---
-        # (Keep setup logic the same)
-        is_nf4_current = config.get("is_nf4", False); height, width = parse_resolution(resolution)
+        is_nf4_current = config.get("is_nf4", False)
+        height, width = parse_resolution(resolution)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
@@ -297,8 +312,31 @@ class HiDreamSampler:
         except Exception as e: print(f"!!! ERROR during execution: {e}"); import traceback; traceback.print_exc(); return (torch.zeros((1, height, width, 3)),)
         finally: pbar.update_absolute(num_inference_steps) # Update pbar regardless
         print("--- Generation Complete ---")
-        if not output_images: print("ERROR: No images returned."); return (torch.zeros((1, height, width, 3)),)
-        output_tensor = pil2tensor(output_images[0]); return (output_tensor,)
+        
+        # Robust output handling
+        if output_images is None or len(output_images) == 0:
+            print("ERROR: No images returned. Creating blank image.")
+            return (torch.zeros((1, height, width, 3)),)
+    
+        try:
+            print(f"Processing output image. Type: {type(output_images[0])}")
+            output_tensor = pil2tensor(output_images[0])
+            if output_tensor is None:
+                print("ERROR: pil2tensor returned None. Creating blank image.")
+                return (torch.zeros((1, height, width, 3)),)
+            
+            # Verify tensor shape is valid
+            if len(output_tensor.shape) != 4 or output_tensor.shape[0] != 1 or output_tensor.shape[3] != 3:
+                print(f"ERROR: Invalid tensor shape {output_tensor.shape}. Creating blank image.")
+                return (torch.zeros((1, height, width, 3)),)
+                
+            print(f"Output tensor shape: {output_tensor.shape}")
+            return (output_tensor,)
+        except Exception as e:
+            print(f"Error processing output image: {e}")
+            import traceback
+            traceback.print_exc()
+            return (torch.zeros((1, height, width, 3)),)
 # --- Node Mappings ---
 NODE_CLASS_MAPPINGS = {"HiDreamSampler": HiDreamSampler}; NODE_DISPLAY_NAME_MAPPINGS = {"HiDreamSampler": "HiDream Sampler (NF4/FP8/BNB)"}
 print("-" * 50 + "\nHiDream Sampler Node Initialized\nAvailable Models: " + str(list(MODEL_CONFIGS.keys())) + "\n" + "-" * 50) # Compact print
