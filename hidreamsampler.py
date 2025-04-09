@@ -88,15 +88,14 @@ def load_models(model_type):
         torch_dtype=torch.bfloat16
     )
 
-    # Patch the pipeline to make sure it moves inputs to the right device
+    # Patch the pipeline to ensure input IDs match encoder device
     class PatchedHiDreamPipeline(HiDreamImagePipeline):
-        def _get_clip_prompt_embeds(self, text_input_ids, **kwargs):
-            # Determine where the encoder lives
+        def _get_clip_prompt_embeds(self, text_input_ids, attention_mask=None):
             encoder_device = self.text_encoder_4.device
-            # Move input IDs to match
             text_input_ids = text_input_ids.to(encoder_device)
-            # Continue with the normal flow
-            return super()._get_clip_prompt_embeds(text_input_ids, **kwargs)
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(encoder_device)
+            return super()._get_clip_prompt_embeds(text_input_ids, attention_mask=attention_mask)
 
     pipe = PatchedHiDreamPipeline.from_pretrained(
         pretrained_model_name_or_path,
@@ -105,6 +104,7 @@ def load_models(model_type):
         text_encoder_4=text_encoder_4,
         torch_dtype=torch.bfloat16
     )
+
     pipe.transformer = transformer
 
     return pipe, config
