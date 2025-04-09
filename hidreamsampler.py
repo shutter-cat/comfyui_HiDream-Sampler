@@ -492,39 +492,4 @@ try:
 except Exception as e:
     print(f"HiDream: Could not register cleanup with model_management: {e}")
 
-# Update load_models function to use manual device placement for NF4 models
-def load_models(model_type):
-    # (All the code before this point remains the same)
-    
-    # Only modify the part in the "Final Setup" section related to NF4 models:
-    # --- 5. Final Setup ---
-    print("\n[5] Finalizing Pipeline...")
-    print("     Assigning transformer...")
-    pipe.transformer = transformer
-    print("     Moving pipeline object to CUDA (final check)...")
-    
-    try:
-        pipe.to("cuda")
-    except Exception as e:
-        print(f"     Warning: Could not move pipeline object to CUDA: {e}.")
-        
-    if is_nf4:
-        print("     Using manual device placement for NF4 instead of CPU offload...")
-        # Instead of enabling CPU offload, try to manually place some components on CPU
-        try:
-            # Keep transformer on GPU but move other components to CPU
-            # This is tricky but may help with memory management
-            if hasattr(pipe, "scheduler"):
-                pipe.scheduler.to("cpu")
-            if hasattr(pipe, "vae"):
-                pipe.vae.to("cpu")
-                
-            print("     ✅ Manual device placement configured")
-        except Exception as e:
-            print(f"     ⚠️ Failed manual device placement: {e}")
-    
-    final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
-    print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
-    return pipe, config
-
 print("-" * 50 + "\nHiDream Sampler Node Initialized\nAvailable Models: " + str(list(MODEL_CONFIGS.keys())) + "\n" + "-" * 50)
