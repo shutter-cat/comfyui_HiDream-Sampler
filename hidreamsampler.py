@@ -329,7 +329,7 @@ class HiDreamSampler:
         try: inference_device = comfy.model_management.get_torch_device()
         except Exception: inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Creating Generator on: {inference_device}"); generator = torch.Generator(device=inference_device).manual_seed(seed)
-        print(f"\n--- Starting Generation ---"); print(f"Model: {model_type}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        print(f"\n--- Starting Generation ---"); print(f"Model: {model_type}, Res: {width}x{height}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
         # --- Run Inference ---
         output_images = None
         try:
