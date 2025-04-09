@@ -142,8 +142,8 @@ def get_scheduler_instance(scheduler_name, shift_value):
     scheduler_class = available_schedulers.get(scheduler_name)
     if scheduler_class is None: raise ValueError(f"Scheduler class '{scheduler_name}' not found...")
     return scheduler_class(num_train_timesteps=1000, shift=shift_value, use_dynamic_shifting=False)
-# --- Loading Function (Handles NF4, FP8, and default BNB) ---
-# (Keep function the same as the last version - it correctly sets up the pipe call now)
+# --- Loading Function (Handles NF4 and default BNB) ---
+# --- Loading Function - Going back to enable_sequential_cpu_offload() for NF4 models
 def load_models(model_type):
     if not hidream_classes_loaded: raise ImportError("Cannot load models: HiDream classes failed to import.")
     if model_type not in MODEL_CONFIGS: raise ValueError(f"Unknown or incompatible model_type: {model_type}")
@@ -156,36 +156,30 @@ def load_models(model_type):
     print(f"--- Loading Model Type: {model_type} ---"); print(f"Model Path: {model_path}")
     print(f"NF4: {is_nf4}, Requires BNB: {requires_bnb}, Requires GPTQ deps: {requires_gptq_deps}")
     start_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"(Start VRAM: {start_mem:.2f} MB)")
-    
     # --- 1. Load LLM (Conditional) ---
     text_encoder_load_kwargs = {"output_hidden_states": True, "low_cpu_mem_usage": True, "torch_dtype": model_dtype,}
     if is_nf4:
-        llama_model_name = NF4_LLAMA_MODEL_NAME
-        print(f"\n[1a] Preparing LLM (GPTQ): {llama_model_name}")
-        if accelerate_available:
-            # Limit GPU memory usage by setting max_memory
+        llama_model_name = NF4_LLAMA_MODEL_NAME; print(f"\n[1a] Preparing LLM (GPTQ): {llama_model_name}")
+        if accelerate_available: 
+            # Fix for device format - use integer instead of cuda:0
             if hasattr(torch.cuda, 'get_device_properties') and torch.cuda.is_available():
                 total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                # Use 75% of available GPU memory
-                max_mem = int(total_mem * 0.75)
-                # Use integer 0 instead of "cuda:0" - this was causing the error
+                # Use 40% for model, leaving room for the transformer
+                max_mem = int(total_mem * 0.4)
                 text_encoder_load_kwargs["max_memory"] = {0: f"{max_mem}GiB"}
                 print(f"     Setting max memory limit: {max_mem}GiB of {total_mem:.1f}GiB")
-            text_encoder_load_kwargs["device_map"] = "auto"
-            print("     Using device_map='auto'")
-        else:
-            print("     accelerate not found, attempting manual placement.")
+            text_encoder_load_kwargs["device_map"] = "auto"; 
+            print("     Using device_map='auto'.")
+        else: print("     accelerate not found, attempting manual placement.")
     else:
         llama_model_name = ORIGINAL_LLAMA_MODEL_NAME; print(f"\n[1a] Preparing LLM (4-bit BNB): {llama_model_name}")
         if bnb_llm_config: text_encoder_load_kwargs["quantization_config"] = bnb_llm_config; print("     Using 4-bit BNB.")
         else: raise ImportError("BNB config required for standard LLM.")
         text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
-        
     print(f"[1b] Loading Tokenizer: {llama_model_name}..."); tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False); print("     Tokenizer loaded.")
     print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)"); text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
     if "device_map" not in text_encoder_load_kwargs: print("     Moving text encoder to CUDA..."); text_encoder.to("cuda")
     step1_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Text encoder loaded! (VRAM: {step1_mem:.2f} MB)")
-    
     # --- 2. Load Transformer (Conditional) ---
     print(f"\n[2] Preparing Transformer from: {model_path}"); transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
     if is_nf4: print("     Type: NF4")
@@ -198,34 +192,22 @@ def load_models(model_type):
     print("     Loading Transformer... (May download files)"); transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
     print("     Moving Transformer to CUDA..."); transformer.to("cuda")
     step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
-    
     # --- 3. Load Scheduler ---
     print(f"\n[3] Preparing Scheduler: {scheduler_name}"); scheduler = get_scheduler_instance(scheduler_name, shift); print(f"     Using Scheduler: {scheduler_name}")
-    
     # --- 4. Load Pipeline ---
     print(f"\n[4] Loading Pipeline from: {model_path}"); print("     Passing pre-loaded components...")
     pipe = HiDreamImagePipeline.from_pretrained(model_path, scheduler=scheduler, tokenizer_4=tokenizer, text_encoder_4=text_encoder, transformer=None, torch_dtype=model_dtype, low_cpu_mem_usage=True); print("     Pipeline structure loaded.")
-    
     # --- 5. Final Setup ---
     print("\n[5] Finalizing Pipeline..."); print("     Assigning transformer..."); pipe.transformer = transformer
     print("     Moving pipeline object to CUDA (final check)...");
     try: pipe.to("cuda")
     except Exception as e: print(f"     Warning: Could not move pipeline object to CUDA: {e}.")
-    
     if is_nf4:
-        print("     Using manual device placement for NF4 instead of CPU offload...")
-        try:
-            # Only move components if they have a 'to' method
-            if hasattr(pipe, "scheduler") and hasattr(pipe.scheduler, "to"):
-                print("     Moving scheduler to CPU")
-                pipe.scheduler.to("cpu")
-            if hasattr(pipe, "vae") and hasattr(pipe.vae, "to"):
-                print("     Moving VAE to CPU")
-                pipe.vae.to("cpu")
-            print("     ✅ Manual device placement configured")
-        except Exception as e:
-            print(f"     ⚠️ Failed manual device placement: {e}")
-            
+        print("     Attempting CPU offload for NF4...");
+        if hasattr(pipe, "enable_sequential_cpu_offload"):
+            try: pipe.enable_sequential_cpu_offload(); print("     ✅ CPU offload enabled.")
+            except Exception as e: print(f"     ⚠️ Failed CPU offload: {e}")
+        else: print("     ⚠️ enable_sequential_cpu_offload() not found.")
     final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
     return pipe, config
     
@@ -298,6 +280,7 @@ def pil2tensor(image: Image.Image):
         except Exception as e2:
             print(f"ComfyUI conversion also failed: {e2}")
             return None
+
 # --- ComfyUI Node Definition ---
 class HiDreamSampler:
     _model_cache = {}
@@ -379,26 +362,15 @@ class HiDreamSampler:
                     print(f"  Removing '{key}'...")
                     try:
                         pipe_to_del, _ = self._model_cache.pop(key)
-                        # Clean up key components to help with memory
-                        if hasattr(pipe_to_del, 'transformer'):
-                            pipe_to_del.transformer = None
-                        if hasattr(pipe_to_del, 'text_encoder_4'):
-                            pipe_to_del.text_encoder_4 = None
-                        if hasattr(pipe_to_del, 'tokenizer_4'):
-                            pipe_to_del.tokenizer_4 = None
-                        if hasattr(pipe_to_del, 'scheduler'):
-                            pipe_to_del.scheduler = None
+                        # Basic cleanup to match original code
                         del pipe_to_del
-                    except Exception as e:
-                        print(f"  Error removing {key}: {e}")
+                    except Exception:
+                        pass
                         
-                # Multiple garbage collection passes
-                for _ in range(3):
-                    gc.collect()
+                # Basic gc as in original code
+                gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                    # Force synchronization
-                    torch.cuda.synchronize()
                 print("Cache cleared.")
                 
             print(f"Loading model for {model_type}...")
@@ -419,21 +391,6 @@ class HiDreamSampler:
         # --- Generation Setup ---
         is_nf4_current = config.get("is_nf4", False)
         height, width = parse_resolution(resolution)
-        
-        # Check resolution size for NF4 models
-        total_pixels = height * width
-        if total_pixels > 1024 * 1024 and "nf4" in model_type:
-            print(f"⚠️ Warning: Large resolution ({width}x{height}) with NF4 model may cause memory issues")
-            # If using very large resolution, use mixed precision
-            if total_pixels > 1.5 * 1024 * 1024:
-                print("Using mixed precision for large resolution")
-                # Set use_mixed_precision flag to use in inference section
-                use_mixed_precision = True
-            else:
-                use_mixed_precision = False
-        else:
-            use_mixed_precision = False
-        
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
@@ -452,49 +409,36 @@ class HiDreamSampler:
         # --- Run Inference ---
         output_images = None
         try:
+            # Same as original working code
             if not is_nf4_current: 
-                print(f"Ensuring pipe on: {inference_device} (Manual offload)")
+                print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)")
                 pipe.to(inference_device)
             else: 
-                print(f"Skipping pipe.to({inference_device}) (Manual device placement active).")
+                print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
                 
             print("Executing pipeline inference...")
             with torch.inference_mode():
-                if use_mixed_precision and torch.cuda.is_available():
-                    print("Running with automatic mixed precision...")
-                    with torch.cuda.amp.autocast():
-                        output_images = pipe(
-                            prompt=prompt,
-                            height=height,
-                            width=width,
-                            guidance_scale=guidance_scale,
-                            num_inference_steps=num_inference_steps,
-                            num_images_per_prompt=1,
-                            generator=generator,
-                        ).images
-                else:
-                    # Original inference code
-                    output_images = pipe(
-                        prompt=prompt,
-                        height=height,
-                        width=width,
-                        guidance_scale=guidance_scale,
-                        num_inference_steps=num_inference_steps,
-                        num_images_per_prompt=1, 
-                        generator=generator,
-                    ).images
+                # Original working code
+                output_images = pipe(
+                    prompt=prompt,
+                    height=height,
+                    width=width,
+                    guidance_scale=guidance_scale,
+                    num_inference_steps=num_inference_steps,
+                    num_images_per_prompt=1,
+                    generator=generator,
+                ).images
             print("Pipeline inference finished.")
-        except Exception as e: 
+        except Exception as e:
             print(f"!!! ERROR during execution: {e}")
             import traceback
             traceback.print_exc()
             return (torch.zeros((1, height, width, 3)),)
-        finally: 
-            pbar.update_absolute(num_inference_steps) # Update pbar regardless
+        finally:
+            pbar.update_absolute(num_inference_steps)
             
         print("--- Generation Complete ---")
         
-        # Robust output handling
         if output_images is None or len(output_images) == 0:
             print("ERROR: No images returned. Creating blank image.")
             return (torch.zeros((1, height, width, 3)),)
@@ -506,17 +450,17 @@ class HiDreamSampler:
                 print("ERROR: pil2tensor returned None. Creating blank image.")
                 return (torch.zeros((1, height, width, 3)),)
             
+            # Add fix for bfloat16 tensor issue
+            if output_tensor.dtype == torch.bfloat16:
+                print("Converting bfloat16 tensor to float32 for ComfyUI compatibility")
+                output_tensor = output_tensor.to(torch.float32)
+                
             # Verify tensor shape is valid
             if len(output_tensor.shape) != 4 or output_tensor.shape[0] != 1 or output_tensor.shape[3] != 3:
                 print(f"ERROR: Invalid tensor shape {output_tensor.shape}. Creating blank image.")
                 return (torch.zeros((1, height, width, 3)),)
                 
-            print(f"Output tensor shape: {output_tensor.shape}, dtype: {output_tensor.dtype}")
-            
-            # Fix for BFloat16 tensor issue
-            if output_tensor.dtype == torch.bfloat16:
-                print("Converting bfloat16 tensor to float32 for ComfyUI compatibility")
-                output_tensor = output_tensor.to(torch.float32)
+            print(f"Output tensor shape: {output_tensor.shape}")
             
             # After generating the image, try to clean up any temporary memory
             try:
