@@ -87,12 +87,12 @@ def load_models(model_type):
 
 
     pipe = HiDreamImagePipeline.from_pretrained(
-        pretrained_model_name_or_path, 
+        pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,
         torch_dtype=torch.bfloat16
-    ).to("cuda", torch.bfloat16)
+    )
     pipe.transformer = transformer
     
     return pipe, config
