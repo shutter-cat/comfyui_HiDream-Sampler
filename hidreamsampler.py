@@ -194,11 +194,19 @@ def load_models(model_type):
     try: pipe.to("cuda")
     except Exception as e: print(f"     Warning: Could not move pipeline object to CUDA: {e}.")
     if is_nf4:
-        print("     Attempting CPU offload for NF4...");
-        if hasattr(pipe, "enable_sequential_cpu_offload"):
-            try: pipe.enable_sequential_cpu_offload(); print("     ✅ CPU offload enabled.")
-            except Exception as e: print(f"     ⚠️ Failed CPU offload: {e}")
-        else: print("     ⚠️ enable_sequential_cpu_offload() not found.")
+        print("     Using manual device placement for NF4 instead of CPU offload...")
+        # Instead of enabling CPU offload, try to manually place some components on CPU
+        try:
+            # Keep transformer on GPU but move other components to CPU
+            # This is tricky but may help with memory management
+            if hasattr(pipe, "scheduler"):
+                pipe.scheduler.to("cpu")
+            if hasattr(pipe, "vae"):
+                pipe.vae.to("cpu")
+                
+            print("     ✅ Manual device placement configured")
+        except Exception as e:
+            print(f"     ⚠️ Failed manual device placement: {e}")
     final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
     return pipe, config
     
