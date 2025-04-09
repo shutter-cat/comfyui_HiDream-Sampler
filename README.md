@@ -59,3 +59,5 @@ Merged with [SanDiegoDude/ComfyUI-HiDream-Sampler](https://github.com/SanDiegoDu
 
 - Full/Dev/Fast requires roughly 27GB VRAM
 - NF4 requires roughly 15GB VRAM
+
+Build upon the original [HiDream-I1]https://github.com/HiDream-ai/HiDream-I1
