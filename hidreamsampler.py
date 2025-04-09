@@ -59,13 +59,10 @@ def load_models(model_type):
     pretrained_model_name_or_path = config["path"]
     scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
     
-    # Load tokenizer
     tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
         LLAMA_MODEL_NAME,
-        use_fast=False
-    )
+        use_fast=False)
     
-    # Load 4-bit quantized LLaMA without explicit device_map
     text_encoder_4 = LlamaForCausalLM.from_pretrained(
         LLAMA_MODEL_NAME,
         output_hidden_states=True,
@@ -74,45 +71,25 @@ def load_models(model_type):
         quantization_config=TransformersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
-        torch_dtype=torch.bfloat16,  # This is just a hint, 4-bit takes precedence
-        attn_implementation="eager"
-    )
+        torch_dtype=torch.bfloat16,
+        attn_implementation="eager").to("cuda")
     
-    # Load 4-bit quantized transformer without device_map
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
-        pretrained_model_name_or_path,
+        pretrained_model_name_or_path, 
         subfolder="transformer",
         quantization_config=DiffusersBitsAndBytesConfig(
             load_in_4bit=True,
-        ),
-        torch_dtype=torch.bfloat16  # This is just a hint, 4-bit takes precedence
-    )
-    
-    # Load the pipeline WITHOUT converting to bfloat16 or setting device_map
+        ), 
+        torch_dtype=torch.bfloat16).to("cuda")
+
     pipe = HiDreamImagePipeline.from_pretrained(
-        pretrained_model_name_or_path,
+        pretrained_model_name_or_path, 
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,
-        low_cpu_mem_usage=True
-    )
-    
-    # Set the transformer
+        torch_dtype=torch.bfloat16
+    ).to("cuda", torch.bfloat16)
     pipe.transformer = transformer
-    
-    # Monkey patch the _get_clip_prompt_embeds method to handle device placement
-    original_get_clip_prompt_embeds = pipe._get_clip_prompt_embeds
-    
-    def patched_get_clip_prompt_embeds(self, text_input_ids, attention_mask=None):
-        encoder_device = self.text_encoder_4.device
-        text_input_ids = text_input_ids.to(encoder_device)
-        if attention_mask is not None:
-            attention_mask = attention_mask.to(encoder_device)
-        return original_get_clip_prompt_embeds(self, text_input_ids, attention_mask=attention_mask)
-    
-    # Replace the method
-    import types
-    pipe._get_clip_prompt_embeds = types.MethodType(patched_get_clip_prompt_embeds, pipe)
     
     return pipe, config
 
@@ -143,7 +120,9 @@ def pil2tensor(image: Image.Image):
 
 # --- ComfyUI Node Definition ---
 class HiDreamSampler:
+
     _model_cache = {}
+
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -152,17 +131,19 @@ class HiDreamSampler:
                 "prompt": ("STRING", {"multiline": True, "default": "A photo of an astronaut riding a horse on the moon"}),
                 "resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xfffffff}),
-                "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), # -1 uses config default
-                "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}), # -1 uses config default
-                "offload_llm": (["Yes", "No"], {"default": "Yes"}),
+                # Steps and CFG are now derived from model_type, but can be overridden optionally
+                 "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), # -1 uses config default
+                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}), # -1 uses config default
             }
         }
+
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "generate"
     CATEGORY = "HiDream"
-    
-    def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg, offload_llm):
+
+    def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg):
+        
         # Load or retrieve cached model
         if model_type not in self._model_cache:
             print(f"Loading model for {model_type}...")
@@ -173,74 +154,34 @@ class HiDreamSampler:
             print(f"Using cached model for {model_type}")
             pipe, config = self._model_cache[model_type]
         
+        # --- Load Models ---
+        # This function now handles caching and device placement
         config = MODEL_CONFIGS[model_type]
-        width, height = parse_resolution(resolution)
+
+        # --- Parse Inputs ---
+        width, height = parse_resolution(resolution) 
+
         num_inference_steps = override_steps if override_steps > 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
+
+        # --- Handle Seed ---
         generator = torch.Generator("cuda").manual_seed(seed)
         
-        # Only do the LLM offloading if the user selected "Yes"
-        if offload_llm == "Yes":
-            print("[HiDream Node] Preparing prompt embeddings...")
-            
-            # Store original device for later
-            original_text_encoder_device = pipe.text_encoder_4.device
-            
-            # Get prompt embeddings - for HiDream, we need to pass the same prompt to all 4 slots
-            with torch.no_grad():
-                # Call encode_prompt with all 4 required prompts (same prompt for all)
-                prompt_embeds, pooled_prompt_embeds = pipe.encode_prompt(
-                    prompt=prompt,          # Primary prompt
-                    prompt_2=prompt,        # Secondary prompt
-                    prompt_3=prompt,        # Tertiary prompt
-                    prompt_4=prompt,        # Quaternary prompt
-                    num_images_per_prompt=1,
-                    do_classifier_free_guidance=guidance_scale > 0.0
-                )
-            
-            # Move text encoder to CPU to free GPU memory
-            print("[HiDream Node] Offloading text encoder to CPU...")
-            pipe.text_encoder_4 = pipe.text_encoder_4.to("cpu")
-            
-            # Run garbage collection to free memory
-            import gc
-            gc.collect()
-            torch.cuda.empty_cache()
-            
-            print("[HiDream Node] Running generation...")
-            
-            # Run the pipeline with the pre-computed embeddings
-            output_images = pipe(
-                prompt_embeds=prompt_embeds,
-                pooled_prompt_embeds=pooled_prompt_embeds,
-                height=height,
-                width=width,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps,
-                num_images_per_prompt=1,
-                generator=generator,
-            ).images
-            
-            # Move text encoder back to original device for future use
-            print("[HiDream Node] Moving LLM back to original device...")
-            pipe.text_encoder_4 = pipe.text_encoder_4.to(original_text_encoder_device)
-            
-        else:
-            # Standard generation without offloading
-            print("[HiDream Node] Running generation with LLM on GPU...")
-            
-            output_images = pipe(
-                prompt=prompt,          # HiDream will internally pass this to all 4 encoders
-                height=height,
-                width=width,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps,
-                num_images_per_prompt=1,
-                generator=generator,
-            ).images
-        
+        output_images = pipe(
+            prompt=prompt,
+            height=height,
+            width=width,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            num_images_per_prompt=1,
+            generator=generator,
+        ).images
+
         print("[HiDream Node] Generation Complete.")
+
+        # --- Convert to ComfyUI Tensor ---
         output_tensor = pil2tensor(output_images[0])
+
         return (output_tensor,)
 
 # --- Node Mappings ---
