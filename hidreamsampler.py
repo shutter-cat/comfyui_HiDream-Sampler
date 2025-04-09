@@ -77,14 +77,14 @@ def load_models(model_type):
     )
     
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
-        pretrained_model_name_or_path,
+        pretrained_model_name_or_path, 
         subfolder="transformer",
         quantization_config=DiffusersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
-        torch_dtype=torch.bfloat16,
-        device_map="auto"
+        torch_dtype=torch.bfloat16
     )
+
 
     pipe = HiDreamImagePipeline.from_pretrained(
         pretrained_model_name_or_path, 
