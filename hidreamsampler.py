@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # HiDream Sampler Node for ComfyUI
-# Version: 2024-07-29a (NF4/FP8/BNB Support, Syntax Fix)
+# Version: 2024-07-29b (NF4/FP8/BNB Support, Indentation Fix)
 #
 # Required Dependencies:
 # - transformers, diffusers, torch, numpy, Pillow
@@ -241,7 +241,7 @@ def load_models(model_type):
     except Exception as e:
          print(f"Error loading tokenizer {llama_model_name}: {e}")
          raise
-    print("     Tokenizer loaded.") # Corrected: Removed semicolon
+    print("     Tokenizer loaded.")
 
     print(f"[1c] Loading Text Encoder: {llama_model_name}...")
     print("     (This may take time and download files...)")
@@ -256,7 +256,6 @@ def load_models(model_type):
          raise
 
     if "device_map" not in text_encoder_load_kwargs:
-        # *** CORRECTED SYNTAX HERE ***
         print("     Moving text encoder to CUDA...")
         try:
             text_encoder.to("cuda")
@@ -272,17 +271,23 @@ def load_models(model_type):
     transformer_load_kwargs = {
         "subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True
     }
-    if is_nf4: print("     Type: NF4 (Quantization included in model files)")
-    elif is_fp8: print("     Type: FP8 (Quantization included in model files)") # transformer_load_kwargs["variant"] = "fp8" # Uncomment if needed
-    else: print("     Type: Standard (Applying 4-bit BNB quantization)")
-        if bnb_transformer_4bit_config: transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
-        else: raise ImportError("BNB config required for transformer but unavailable.")
+    if is_nf4:
+        print("     Type: NF4 (Quantization included in model files)")
+    elif is_fp8:
+        print("     Type: FP8 (Quantization included in model files)")
+        # transformer_load_kwargs["variant"] = "fp8" # Uncomment if needed
+    else: # Default BNB case
+        print("     Type: Standard (Applying 4-bit BNB quantization)")
+        # *** CORRECTED INDENTATION HERE ***
+        if bnb_transformer_4bit_config:
+            transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
+        else:
+            raise ImportError("BNB config required for transformer but unavailable.")
 
     print("     Loading Transformer model...")
     print("     (This may take time and download files...)")
     try:
         transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
-        # *** CORRECTED SYNTAX HERE ***
         print("     Moving Transformer to CUDA...")
         transformer.to("cuda") # Move transformer manually
     except Exception as e:
@@ -323,7 +328,6 @@ def load_models(model_type):
     pipe.transformer = transformer
 
     print("     Moving pipeline object to CUDA (final check)...")
-    # *** CORRECTED SYNTAX HERE ***
     try:
         pipe.to("cuda")
     except Exception as e:
