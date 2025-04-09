@@ -1,4 +1,4 @@
-![image](https://github.com/user-attachments/assets/3d4e9bee-772b-4c57-84cb-b5a6da30efd5)
+![image](https://github.com/user-attachments/assets/42ae28d2-5170-4955-894d-e5458784e22a)
 
 # HiDreamSampler for ComfyUI
 
