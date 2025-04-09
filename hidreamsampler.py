@@ -59,6 +59,7 @@ def load_models(model_type):
     pretrained_model_name_or_path = config["path"]
     scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False)
     
+    # Load tokenizer
     tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
         LLAMA_MODEL_NAME,
         use_fast=False
@@ -70,43 +71,62 @@ def load_models(model_type):
         output_hidden_states=True,
         output_attentions=True,
         low_cpu_mem_usage=True,
-        device_map="auto",  # allow HF to scatter this properly
         quantization_config=TransformersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
         torch_dtype=torch.bfloat16,
         attn_implementation="eager"
-    )
+    ).to("cuda")
     
     # Load 4-bit quantized transformer
     transformer = HiDreamImageTransformer2DModel.from_pretrained(
-        pretrained_model_name_or_path, 
+        pretrained_model_name_or_path,
         subfolder="transformer",
         quantization_config=DiffusersBitsAndBytesConfig(
             load_in_4bit=True,
         ),
         torch_dtype=torch.bfloat16
-    )
-
-    # Patch the pipeline to ensure input IDs match encoder device
-    class PatchedHiDreamPipeline(HiDreamImagePipeline):
-        def _get_clip_prompt_embeds(self, text_input_ids, attention_mask=None):
-            encoder_device = self.text_encoder_4.device
-            text_input_ids = text_input_ids.to(encoder_device)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(encoder_device)
-            return super()._get_clip_prompt_embeds(text_input_ids, attention_mask=attention_mask)
-
-    pipe = PatchedHiDreamPipeline.from_pretrained(
+    ).to("cuda")
+    
+    # Load the pipeline
+    pipe = HiDreamImagePipeline.from_pretrained(
         pretrained_model_name_or_path,
         scheduler=scheduler,
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,
         torch_dtype=torch.bfloat16
-    )
-
+    ).to("cuda", torch.bfloat16)
+    
+    # Set the transformer
     pipe.transformer = transformer
-
+    
+    # Monkey patch the method without changing its signature
+    original_get_clip_prompt_embeds = pipe._get_clip_prompt_embeds
+    
+    def patched_get_clip_prompt_embeds(*args, **kwargs):
+        self = args[0]  # The first arg is 'self'
+        
+        # Get all tensors in both args and kwargs and move them to the correct device
+        encoder_device = self.text_encoder_4.device
+        
+        # Process positional arguments after 'self'
+        new_args = list(args)
+        for i in range(1, len(args)):
+            if torch.is_tensor(args[i]):
+                new_args[i] = args[i].to(encoder_device)
+        
+        # Process keyword arguments
+        for key in kwargs:
+            if torch.is_tensor(kwargs[key]):
+                kwargs[key] = kwargs[key].to(encoder_device)
+        
+        # Call the original method with the updated args
+        return original_get_clip_prompt_embeds(*new_args, **kwargs)
+    
+    # Replace the method
+    import types
+    pipe._get_clip_prompt_embeds = types.MethodType(patched_get_clip_prompt_embeds, pipe)
+    
     return pipe, config
 
 # Parse resolution string to get height and width
