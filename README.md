@@ -1,15 +1,16 @@
 Forked from original https://github.com/lum3on/comfyui_HiDream-Sampler
 
-## Added fp8(full only) and NF4 (Full/Dev/Fast) download and load support
-## Added better memory handling
-## Added more informative CLI output for TQDM
+- Added fp8(full only) and NF4 (Full/Dev/Fast) download and load support
+- Added better memory handling
+- Added more informative CLI output for TQDM
 
 Many thanks to the folks who created this and set it up for Comfy, I just spent a few hours adding better support for consumer GPUs.
 
-Full/Dev/Fast requires roughly 27GB VRAM
-NF4 requires roughly 15GB VRAM
-
-###### NOTE - fp8 support is still a WIP.
+- Full/Dev/Fast requires roughly 27GB VRAM
+- NF4 requires roughly 15GB VRAM
+- FP8 TBD
+  
+# NOTE - fp8 support is still a WIP.
 
 
 
