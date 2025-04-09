@@ -19,7 +19,7 @@ Please make sure you have installed Flash Attention. We recommend CUDA versions 
 - add --use-flash-attention in "run_nvidia_gpu.bat"
 - Use the "HiDream Sampler" node once to download the model
 
-(If you don't want to install random wheel, you can take it from from [here]([from here ](https://github.com/Foul-Tarnished/flash-attention/actions)) (it should create a [release](https://github.com/Foul-Tarnished/flash-attention/releases) once it finish, which should take ~2 hours on GitHub CI))
+(If you don't want to install random wheel, you can take it from [from here](https://github.com/Foul-Tarnished/flash-attention/actions)) (it should create a [release](https://github.com/Foul-Tarnished/flash-attention/releases) once it finish, which should take ~2 hours on GitHub CI))
 
 1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
    ```bash
