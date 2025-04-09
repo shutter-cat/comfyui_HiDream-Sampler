@@ -1,14 +1,3 @@
-Forked from original https://github.com/lum3on/comfyui_HiDream-Sampler
-
-- Added NF4 (Full/Dev/Fast) download and load support
-- Added better memory handling
-- Added more informative CLI output for TQDM
-
-Many thanks to the folks who created this and set it up for Comfy, I just spent a few hours adding better support for consumer GPUs.
-
-- Full/Dev/Fast requires roughly 27GB VRAM
-- NF4 requires roughly 15GB VRAM
-
 ![image](https://github.com/user-attachments/assets/3d4e9bee-772b-4c57-84cb-b5a6da30efd5)
 
 # HiDreamSampler for ComfyUI
@@ -59,3 +48,14 @@ Please make sure you have installed Flash Attention. We recommend CUDA versions 
 ## Notes
 Models are cached after the first load to improve performance and use 4-bit quantization models from https://github.com/hykilpikonna/HiDream-I1-nf4.
 Ensure you have sufficient VRAM (e.g., 16GB+ recommended for full mode).
+
+## Credits
+
+Merged with [SanDiegoDude/ComfyUI-HiDream-Sampler](https://github.com/SanDiegoDude/ComfyUI-HiDream-Sampler/) who implemented a cleaner version for my originial NF4 / fp8 support.
+
+- Added NF4 (Full/Dev/Fast) download and load support
+- Added better memory handling
+- Added more informative CLI output for TQDM
+
+- Full/Dev/Fast requires roughly 27GB VRAM
+- NF4 requires roughly 15GB VRAM
