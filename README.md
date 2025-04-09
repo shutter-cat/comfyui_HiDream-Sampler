@@ -1,3 +1,5 @@
+![image](https://github.com/user-attachments/assets/3d4e9bee-772b-4c57-84cb-b5a6da30efd5)
+
 # HiDreamSampler for ComfyUI
 
 A custom ComfyUI node for generating images using the HiDream AI model.
@@ -9,6 +11,15 @@ A custom ComfyUI node for generating images using the HiDream AI model.
 
 ## Installation
 Please make sure you have installed Flash Attention. We recommend CUDA versions 12.4 for the manual installation.
+
+- Get Flash-Attention 2 wheel from HuggingFace (Python 3.12, PyTorch 2.6.0, cuda 12.6, other available there too)
+- Install it in ComfyUI (.\python_embeded\python.exe -s -m pip install file.whl for portable version)
+- Install accelerate .\python_embeded\python.exe -s -m pip install accelerate>=0.26.0
+- Install this node with ComfyManager (or manually, don't forget to call python_embeded etc for portable version)
+- add --use-flash-attention in "run_nvidia_gpu.bat"
+- Use the "HiDream Sampler" node once to download the model
+
+(If you don't want to install random wheel, you can take it from here (it should create a release once it finish, which should take ~2 hours on GitHub CI))
 
 1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
    ```bash
