@@ -162,6 +162,7 @@ def load_models(model_type):
     print(f"--- Loading Model Type: {model_type} ---"); print(f"Model Path: {model_path}")
     print(f"NF4: {is_nf4}, FP8: {is_fp8}, Requires BNB: {requires_bnb}, Requires GPTQ deps: {requires_gptq_deps}")
     start_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"(Start VRAM: {start_mem:.2f} MB)")
+    
     # --- 1. Load LLM (Conditional) ---
     text_encoder_load_kwargs = {"output_hidden_states": True, "low_cpu_mem_usage": True, "torch_dtype": model_dtype,}
     if is_nf4:
@@ -177,19 +178,86 @@ def load_models(model_type):
     print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)"); text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
     if "device_map" not in text_encoder_load_kwargs: print("     Moving text encoder to CUDA..."); text_encoder.to("cuda")
     step1_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Text encoder loaded! (VRAM: {step1_mem:.2f} MB)")
+    
     # --- 2. Load Transformer (Conditional) ---
-    print(f"\n[2] Preparing Transformer from: {model_path}"); transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
-    if is_nf4: print("     Type: NF4")
-    elif is_fp8: print("     Type: FP8")
+    print(f"\n[2] Preparing Transformer from: {model_path}")
+    
+    # Special handling for FP8 models - they need a different loading approach
+    if is_fp8:
+        print("     Type: FP8 (Special loading mode)")
+        try:
+            # Try using a modified loading approach for FP8
+            print("     Strategy 1: Loading with float16 dtype...")
+            transformer_load_kwargs = {
+                "subfolder": "transformer", 
+                "torch_dtype": torch.float16,  # Try float16 instead of bfloat16 for FP8
+                "low_cpu_mem_usage": True,
+                # Don't use quantization_config for FP8
+            }
+            
+            # For FP8 models, we need to patch the loading process to handle the missing input_scale
+            # Let's try a different loading approach entirely
+            import huggingface_hub
+            print("     Downloading model config to create from scratch...")
+            config_path = huggingface_hub.hf_hub_download(repo_id=model_path, filename="transformer/config.json")
+            
+            # Load config and create model without weights first
+            from transformers import AutoConfig
+            transformer_config = AutoConfig.from_pretrained(config_path)
+            transformer = HiDreamImageTransformer2DModel._from_config(transformer_config)
+            print("     Created model from config, loading weights separately...")
+            
+            # Now load state dict manually with ignore option
+            import torch
+            from safetensors.torch import load_file
+            
+            # Try to find the weight file
+            try:
+                model_file = huggingface_hub.hf_hub_download(
+                    repo_id=model_path, 
+                    filename="transformer/diffusion_pytorch_model.safetensors",
+                    subfolder=None
+                )
+                state_dict = load_file(model_file)
+            except Exception as e:
+                print(f"     Could not load safetensors, trying PyTorch format: {e}")
+                model_file = huggingface_hub.hf_hub_download(
+                    repo_id=model_path, 
+                    filename="transformer/diffusion_pytorch_model.bin",
+                    subfolder=None
+                )
+                state_dict = torch.load(model_file, map_location="cpu")
+            
+            # Load the weights, ignoring missing keys
+            transformer.load_state_dict(state_dict, strict=False)
+            print("     ✅ Successfully loaded model weights with missing keys ignored!")
+            
+        except Exception as e:
+            print(f"     ❌ FP8 loading failed: {e}")
+            print("     Disabling FP8 support. Please use non-FP8 models for now.")
+            raise ImportError(f"Could not load FP8 model: {e}")
+            
+    elif is_nf4:
+        print("     Type: NF4")
+        transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
+        transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
     else: # Default BNB case
         print("     Type: Standard (Applying 4-bit BNB quantization)")
         if bnb_transformer_4bit_config:
-            transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
+            transformer_load_kwargs = {
+                "subfolder": "transformer", 
+                "torch_dtype": model_dtype, 
+                "low_cpu_mem_usage": True,
+                "quantization_config": bnb_transformer_4bit_config
+            }
         else:
             raise ImportError("BNB config required for transformer but unavailable.")
-    print("     Loading Transformer... (May download files)"); transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
-    print("     Moving Transformer to CUDA..."); transformer.to("cuda")
-    step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
+        transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
+    
+    print("     Moving Transformer to CUDA...")
+    transformer.to("cuda")
+    step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+    print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
     # --- 3. Load Scheduler ---
     print(f"\n[3] Preparing Scheduler: {scheduler_name}"); scheduler = get_scheduler_instance(scheduler_name, shift); print(f"     Using Scheduler: {scheduler_name}")
     # --- 4. Load Pipeline ---
