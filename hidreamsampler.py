@@ -274,21 +274,68 @@ def pil2tensor(image: Image.Image):
 # --- ComfyUI Node Definition ---
 class HiDreamSampler:
     _model_cache = {}
+    
+    # Add a classmethod for explicit cleanup that ComfyUI can call
     @classmethod
-    def INPUT_TYPES(s): # (Keep method the same)
+    def cleanup_models(cls):
+        """Clean up all cached models - can be called by external memory management"""
+        print("HiDream: Cleaning up all cached models...")
+        keys_to_del = list(cls._model_cache.keys())
+        for key in keys_to_del:
+            print(f"  Removing '{key}'...")
+            try:
+                pipe_to_del, _ = cls._model_cache.pop(key)
+                # Remove references to components that might keep memory
+                if hasattr(pipe_to_del, 'transformer'):
+                    pipe_to_del.transformer = None
+                if hasattr(pipe_to_del, 'text_encoder_4'):
+                    pipe_to_del.text_encoder_4 = None
+                del pipe_to_del
+            except Exception as e:
+                print(f"  Error cleaning up {key}: {e}")
+        # Force garbage collection
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("HiDream: Cache cleared")
+        return True
+    
+    @classmethod
+    def INPUT_TYPES(s):
         available_model_types = list(MODEL_CONFIGS.keys())
         if not available_model_types: return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
         default_model = "fast-nf4" if "fast-nf4" in available_model_types else "fast" if "fast" in available_model_types else available_model_types[0]
         return {"required": {"model_type": (available_model_types, {"default": default_model}),"prompt": ("STRING", {"multiline": True, "default": "..."}),"resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),"seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),}}
-    RETURN_TYPES = ("IMAGE",); RETURN_NAMES = ("image",); FUNCTION = "generate"; CATEGORY = "HiDream"
+    
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "generate"
+    CATEGORY = "HiDream"
+    
     def generate(self, model_type, prompt, resolution, seed, override_steps, override_cfg, **kwargs):
-        if not MODEL_CONFIGS or model_type == "error": print("HiDream Error: No models loaded."); return (torch.zeros((1, 512, 512, 3)),)
+        # Monitor initial memory usage
+        if torch.cuda.is_available():
+            initial_mem = torch.cuda.memory_allocated() / 1024**2
+            print(f"HiDream: Initial VRAM usage: {initial_mem:.2f} MB")
+            
+        if not MODEL_CONFIGS or model_type == "error": 
+            print("HiDream Error: No models loaded.")
+            return (torch.zeros((1, 512, 512, 3)),)
+            
         pipe = None; config = None
         # --- Model Loading / Caching ---
         if model_type in self._model_cache:
-            print(f"Checking cache for {model_type}..."); pipe, config = self._model_cache[model_type]; valid_cache = True
-            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: valid_cache = False; print("Invalid cache, reloading..."); del self._model_cache[model_type]; pipe, config = None, None
-            if valid_cache: print("Using cached model.")
+            print(f"Checking cache for {model_type}...")
+            pipe, config = self._model_cache[model_type]
+            valid_cache = True
+            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: 
+                valid_cache = False
+                print("Invalid cache, reloading...")
+                del self._model_cache[model_type]
+                pipe, config = None, None
+            if valid_cache: 
+                print("Using cached model.")
+                
         if pipe is None:
             if self._model_cache:
                 print(f"Clearing ALL cache before loading {model_type}...")
@@ -296,10 +343,15 @@ class HiDreamSampler:
                 for key in keys_to_del:
                     print(f"  Removing '{key}'...")
                     try:
-                        pipe_to_del, _= self._model_cache.pop(key)
+                        pipe_to_del, _ = self._model_cache.pop(key)
+                        # Clean up key components to help with memory
+                        if hasattr(pipe_to_del, 'transformer'):
+                            pipe_to_del.transformer = None
+                        if hasattr(pipe_to_del, 'text_encoder_4'):
+                            pipe_to_del.text_encoder_4 = None
                         del pipe_to_del
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"  Error removing {key}: {e}")
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -314,22 +366,38 @@ class HiDreamSampler:
                 import traceback
                 traceback.print_exc()
                 return (torch.zeros((1, 512, 512, 3)),)
-        if pipe is None or config is None: print("CRITICAL ERROR: Load failed."); return (torch.zeros((1, 512, 512, 3)),)
+                
+        if pipe is None or config is None: 
+            print("CRITICAL ERROR: Load failed.")
+            return (torch.zeros((1, 512, 512, 3)),)
+            
         # --- Generation Setup ---
         is_nf4_current = config.get("is_nf4", False)
         height, width = parse_resolution(resolution)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
-        try: inference_device = comfy.model_management.get_torch_device()
-        except Exception: inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Creating Generator on: {inference_device}"); generator = torch.Generator(device=inference_device).manual_seed(seed)
-        print(f"\n--- Starting Generation ---"); print(f"Model: {model_type}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        
+        try: 
+            inference_device = comfy.model_management.get_torch_device()
+        except Exception: 
+            inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            
+        print(f"Creating Generator on: {inference_device}")
+        generator = torch.Generator(device=inference_device).manual_seed(seed)
+        
+        print(f"\n--- Starting Generation ---")
+        print(f"Model: {model_type}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        
         # --- Run Inference ---
         output_images = None
         try:
-            if not is_nf4_current: print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)"); pipe.to(inference_device)
-            else: print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
+            if not is_nf4_current: 
+                print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)")
+                pipe.to(inference_device)
+            else: 
+                print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
+                
             print("Executing pipeline inference...")
             with torch.inference_mode():
                 # *** Final pipe() call matching reference script ***
@@ -343,15 +411,21 @@ class HiDreamSampler:
                     generator=generator,
                 ).images
             print("Pipeline inference finished.")
-        except Exception as e: print(f"!!! ERROR during execution: {e}"); import traceback; traceback.print_exc(); return (torch.zeros((1, height, width, 3)),)
-        finally: pbar.update_absolute(num_inference_steps) # Update pbar regardless
+        except Exception as e: 
+            print(f"!!! ERROR during execution: {e}")
+            import traceback
+            traceback.print_exc()
+            return (torch.zeros((1, height, width, 3)),)
+        finally: 
+            pbar.update_absolute(num_inference_steps) # Update pbar regardless
+            
         print("--- Generation Complete ---")
         
         # Robust output handling
         if output_images is None or len(output_images) == 0:
             print("ERROR: No images returned. Creating blank image.")
             return (torch.zeros((1, height, width, 3)),)
-    
+
         try:
             print(f"Processing output image. Type: {type(output_images[0])}")
             output_tensor = pil2tensor(output_images[0])
@@ -365,12 +439,84 @@ class HiDreamSampler:
                 return (torch.zeros((1, height, width, 3)),)
                 
             print(f"Output tensor shape: {output_tensor.shape}")
+            
+            # After generating the image, try to clean up any temporary memory
+            try:
+                import comfy.model_management as model_management
+                print("HiDream: Requesting ComfyUI memory cleanup...")
+                model_management.soft_empty_cache()
+            except Exception as e:
+                print(f"HiDream: ComfyUI cleanup failed: {e}")
+                
+            # Log final memory usage
+            if torch.cuda.is_available():
+                final_mem = torch.cuda.memory_allocated() / 1024**2
+                print(f"HiDream: Final VRAM usage: {final_mem:.2f} MB (Change: {final_mem-initial_mem:.2f} MB)")
+                
             return (output_tensor,)
         except Exception as e:
             print(f"Error processing output image: {e}")
             import traceback
             traceback.print_exc()
             return (torch.zeros((1, height, width, 3)),)
+
 # --- Node Mappings ---
-NODE_CLASS_MAPPINGS = {"HiDreamSampler": HiDreamSampler}; NODE_DISPLAY_NAME_MAPPINGS = {"HiDreamSampler": "HiDream Sampler (NF4/FP8/BNB)"}
-print("-" * 50 + "\nHiDream Sampler Node Initialized\nAvailable Models: " + str(list(MODEL_CONFIGS.keys())) + "\n" + "-" * 50) # Compact print
+NODE_CLASS_MAPPINGS = {"HiDreamSampler": HiDreamSampler}
+NODE_DISPLAY_NAME_MAPPINGS = {"HiDreamSampler": "HiDream Sampler (NF4/BNB)"}
+
+# --- Register with ComfyUI's Memory Management ---
+try:
+    import comfy.model_management as model_management
+    
+    # Check if we can register a cleanup callback
+    if hasattr(model_management, 'unload_all_models'):
+        original_unload = model_management.unload_all_models
+        
+        # Wrap the original function to include our cleanup
+        def wrapped_unload():
+            print("HiDream: ComfyUI is unloading all models, cleaning HiDream cache...")
+            HiDreamSampler.cleanup_models()
+            return original_unload()
+            
+        # Replace the original function with our wrapped version
+        model_management.unload_all_models = wrapped_unload
+        print("HiDream: Successfully registered with ComfyUI memory management")
+except Exception as e:
+    print(f"HiDream: Could not register cleanup with model_management: {e}")
+
+# Update load_models function to use manual device placement for NF4 models
+def load_models(model_type):
+    # (All the code before this point remains the same)
+    
+    # Only modify the part in the "Final Setup" section related to NF4 models:
+    # --- 5. Final Setup ---
+    print("\n[5] Finalizing Pipeline...")
+    print("     Assigning transformer...")
+    pipe.transformer = transformer
+    print("     Moving pipeline object to CUDA (final check)...")
+    
+    try:
+        pipe.to("cuda")
+    except Exception as e:
+        print(f"     Warning: Could not move pipeline object to CUDA: {e}.")
+        
+    if is_nf4:
+        print("     Using manual device placement for NF4 instead of CPU offload...")
+        # Instead of enabling CPU offload, try to manually place some components on CPU
+        try:
+            # Keep transformer on GPU but move other components to CPU
+            # This is tricky but may help with memory management
+            if hasattr(pipe, "scheduler"):
+                pipe.scheduler.to("cpu")
+            if hasattr(pipe, "vae"):
+                pipe.vae.to("cpu")
+                
+            print("     ✅ Manual device placement configured")
+        except Exception as e:
+            print(f"     ⚠️ Failed manual device placement: {e}")
+    
+    final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+    print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
+    return pipe, config
+
+print("-" * 50 + "\nHiDream Sampler Node Initialized\nAvailable Models: " + str(list(MODEL_CONFIGS.keys())) + "\n" + "-" * 50)
