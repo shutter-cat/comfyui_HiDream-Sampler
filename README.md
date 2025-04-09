@@ -23,14 +23,14 @@ A custom ComfyUI node for generating images using the HiDream AI model.
 ## Installation
 Please make sure you have installed Flash Attention. We recommend CUDA versions 12.4 for the manual installation.
 
-- Get Flash-Attention 2 wheel from HuggingFace (Python 3.12, PyTorch 2.6.0, cuda 12.6, other available there too)
+- Get Flash-Attention 2 wheel from [HuggingFace](https://huggingface.co/lldacing/flash-attention-windows-wheel/blob/main/flash_attn-2.7.4%2Bcu126torch2.6.0cxx11abiFALSE-cp312-cp312-win_amd64.whl) (Python 3.12, PyTorch 2.6.0, cuda 12.6, other available there too)
 - Install it in ComfyUI (.\python_embeded\python.exe -s -m pip install file.whl for portable version)
 - Install accelerate .\python_embeded\python.exe -s -m pip install accelerate>=0.26.0
 - Install this node with ComfyManager (or manually, don't forget to call python_embeded etc for portable version)
 - add --use-flash-attention in "run_nvidia_gpu.bat"
 - Use the "HiDream Sampler" node once to download the model
 
-(If you don't want to install random wheel, you can take it from here (it should create a release once it finish, which should take ~2 hours on GitHub CI))
+(If you don't want to install random wheel, you can take it from [from here](https://github.com/Foul-Tarnished/flash-attention/actions) (it should create a [release](https://github.com/Foul-Tarnished/flash-attention/releases) once it finish, which should take ~2 hours on GitHub CI))
 
 1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
    ```bash
