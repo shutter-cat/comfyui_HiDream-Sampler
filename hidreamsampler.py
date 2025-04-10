@@ -341,7 +341,7 @@ class HiDreamSampler:
         print("HiDream: Cache cleared")
         return True
         
-    @classmethod@classmethod
+    @classmethod
     def INPUT_TYPES(s):
         available_model_types = list(MODEL_CONFIGS.keys())
         if not available_model_types:
