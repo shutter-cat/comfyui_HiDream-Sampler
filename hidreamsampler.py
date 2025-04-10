@@ -558,12 +558,7 @@ class HiDreamSampler:
                 model_management.soft_empty_cache()
             except Exception as e:
                 print(f"HiDream: ComfyUI cleanup failed: {e}")
-                
-            # Log final memory usage
-            if torch.cuda.is_available():
-                final_mem = torch.cuda.memory_allocated() / 1024**2
-                print(f"HiDream: Final VRAM usage: {final_mem:.2f} MB (Change: {final_mem-initial_mem:.2f} MB)")
-                
+                      
             return (output_tensor,)
         except Exception as e:
             print(f"Error processing output image: {e}")
@@ -849,11 +844,12 @@ class HiDreamSamplerAdvanced:
 
 # --- Node Mappings ---
 NODE_CLASS_MAPPINGS = {
-    "HiDreamSampler": HiDreamSampler
+    "HiDreamSampler": HiDreamSampler,
+    "HiDreamSamplerAdvanced": HiDreamSamplerAdvanced
 }
-
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "HiDreamSampler": "HiDream Sampler (NF4/FP8/BNB)"
+    "HiDreamSampler": "HiDream Sampler",
+    "HiDreamSamplerAdvanced": "HiDream Sampler (Advanced)"
 }
 
 print("-" * 50 + 
