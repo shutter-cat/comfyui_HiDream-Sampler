@@ -571,7 +571,7 @@ class HiDreamSampler:
 # --- ComfyUI Node 2 Definition ---
 class HiDreamSamplerAdvanced:
     _model_cache = HiDreamSampler._model_cache  # Share model cache with basic node
-    cleanup_models = HiDreamSampler.cleanup_models  # Share cleanup method
+    #cleanup_models = HiDreamSampler.cleanup_models  # Share cleanup method
     
     @classmethod
     def INPUT_TYPES(s):
