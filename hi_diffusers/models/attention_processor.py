@@ -7,27 +7,11 @@ USE_FLASH_ATTN3 = False
 
 try:
     from flash_attn_interface import flash_attn_func
-    USE_FLASH_ATTN = True
     USE_FLASH_ATTN3 = True
 except Exception:
-    try:
-        from flash_attn import flash_attn_func
-        USE_FLASH_ATTN = True
-    except Exception:
-        USE_FLASH_ATTN = False
-        USE_FLASH_ATTN3 = False
-
-# Check attention
-try:
-    capability = torch.cuda.get_device_capability()
-    major, minor = capability
-    if major < 8:
-        USE_FLASH_ATTN = False
-        USE_FLASH_ATTN3 = False
-except Exception:
-    # AMD GPU
-    USE_FLASH_ATTN = False
+    from flash_attn import flash_attn_func
     USE_FLASH_ATTN3 = False
+
 
 # Copied from https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -37,12 +21,14 @@ def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> t
     xk_out = freqs_cis[..., 0] * xk_[..., 0] + freqs_cis[..., 1] * xk_[..., 1]
     return xq_out.reshape(*xq.shape).type_as(xq), xk_out.reshape(*xk.shape).type_as(xk)
 
-def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
-    if USE_FLASH_ATTN3:
+def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attention: str):
+
+    # "sdpa", "SageAttention", "FlashAttention2", "FlashAttention3"
+    if attention = "FlashAttention3":
         hidden_states = flash_attn_func(query, key, value, causal=False, deterministic=False)[0]
-    elif USE_FLASH_ATTN:
+    elif attention = "FlashAttention2":
         hidden_states = flash_attn_func(query, key, value, dropout_p=0., causal=False)
-    else:
+    elif attention = "sdpa":
         # use sdpa attention fallback
         q = query.transpose(1, 2)  
         k = key.transpose(1, 2)    
@@ -55,15 +41,18 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
             is_causal=False
         )
         hidden_states = hidden_states.transpose(1, 2)
+    elif attention = "SageAttention":
+        hidden_states = flash_attn_func(query, key, value, tensor_layout="NHD", is_causal=False)
 
     hidden_states = hidden_states.flatten(-2)
     hidden_states = hidden_states.to(query.dtype)
     return hidden_states
 
-
-
 class HiDreamAttnProcessor_flashattn:
     """Attention processor used typically in processing the SD3-like self-attention projections."""
+
+    def __init__(self, attn_impl="sdpa"):
+        self.attn_impl = attn_impl
 
     def __call__(
         self,
@@ -119,7 +108,7 @@ class HiDreamAttnProcessor_flashattn:
             query = torch.cat([query_1, query_2], dim=-1)
             key = torch.cat([key_1, key_2], dim=-1)
 
-        hidden_states = attention(query, key, value)
+        hidden_states = attention(query, key, value, self.attn_impl)
 
         if not attn.single:
             hidden_states_i, hidden_states_t = torch.split(hidden_states, [num_image_tokens, num_text_tokens], dim=1)

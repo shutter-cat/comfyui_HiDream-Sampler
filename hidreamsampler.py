@@ -165,7 +165,7 @@ def get_scheduler_instance(scheduler_name, shift_value):
     return scheduler_class(num_train_timesteps=1000, shift=shift_value, use_dynamic_shifting=False)
 
 # --- Loading Function (Handles NF4, FP8, and default BNB) ---
-def load_models(model_type, use_uncensored_llm):
+def load_models(model_type, use_uncensored_llm, transformer_attn_impl='sdpa'):
     if not hidream_classes_loaded:
         raise ImportError("Cannot load models: HiDream classes failed to import.")
     if model_type not in MODEL_CONFIGS:
@@ -242,7 +242,8 @@ def load_models(model_type, use_uncensored_llm):
     transformer_load_kwargs = {
         "subfolder": "transformer",
         "torch_dtype": model_dtype,
-        "low_cpu_mem_usage": True
+        "low_cpu_mem_usage": True,
+        "attn_impl": attn_impl,
     }
     
     if is_nf4:
@@ -314,6 +315,8 @@ RESOLUTION_OPTIONS = [ # (Keep list the same)
     "880 × 1168 (Portrait)","1168 × 880 (Landscape)","1248 × 832 (Landscape)",
     "832 × 1248 (Portrait)"
 ]
+ATTN_IMPLEMENTATION = ["sdpa", "SageAttention", "FlashAttention2", "FlashAttention3"]
+
 def parse_resolution(resolution_str):
     """Parse resolution string into height and width dimensions."""
     try:
@@ -399,6 +402,7 @@ class HiDreamSampler:
                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
                 "override_width": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),
                 "override_height": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),
+                "attn_implementation": (ATTN_IMPLEMENTATION, {"default": "sdpa"})
             }
         }
     
@@ -406,7 +410,7 @@ class HiDreamSampler:
     RETURN_NAMES = ("image",)
     FUNCTION = "generate"
     CATEGORY = "HiDream"
-    def generate(self, model_type, prompt, fixed_resolution, seed, override_steps, override_cfg, override_width, override_height, **kwargs):
+    def generate(self, model_type, prompt, fixed_resolution, seed, override_steps, override_cfg, override_width, override_height, attn_implementation, **kwargs):
         print("DEBUG: HiDreamSampler.generate() called")
         if not MODEL_CONFIGS or model_type == "error": 
             print("HiDream Error: No models loaded.")
@@ -457,7 +461,7 @@ class HiDreamSampler:
                 
             print(f"Loading model for {model_type}{' (uncensored)' if use_uncensored_llm else ''}...")
             try:
-                pipe, config = load_models(model_type, use_uncensored_llm)
+                pipe, config = load_models(model_type, use_uncensored_llm, attn_implementation)
                 self._model_cache[cache_key] = (pipe, config)
                 print(f"Model {model_type}{' (uncensored)' if use_uncensored_llm else ''} loaded & cached!")
             except Exception as e:
@@ -677,7 +681,7 @@ class HiDreamSamplerAdvanced:
                 
             print(f"Loading model for {model_type}{' (uncensored)' if use_uncensored_llm else ''}...")
             try:
-                pipe, config = load_models(model_type, use_uncensored_llm)
+                pipe, config = load_models(model_type, use_uncensored_llm, attn_implementation)
                 self._model_cache[cache_key] = (pipe, config)
                 print(f"Model {model_type}{' (uncensored)' if use_uncensored_llm else ''} loaded & cached!")
             except Exception as e:
