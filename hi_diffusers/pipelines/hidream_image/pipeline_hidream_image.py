@@ -558,14 +558,18 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         max_sequence_length_t5: Optional[int] = None,
         max_sequence_length_llama: Optional[int] = None,
     ):
+        disable scaling entirely
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
-
         division = self.vae_scale_factor * 2
-        S_max = (self.default_sample_size * self.vae_scale_factor) ** 2
-        scale = S_max / (width * height)
-        scale = math.sqrt(scale)
-        width, height = int(width * scale // division * division), int(height * scale // division * division)
+        
+        # Force dimensions to be divisible by division without any area scaling
+        width = int(width // division * division)
+        height = int(height // division * division)
+        
+        # Ensure minimum dimensions
+        width = max(width, division)
+        height = max(height, division)
 
         self._guidance_scale = guidance_scale
         self._joint_attention_kwargs = joint_attention_kwargs
