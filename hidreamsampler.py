@@ -165,7 +165,7 @@ def get_scheduler_instance(scheduler_name, shift_value):
     return scheduler_class(num_train_timesteps=1000, shift=shift_value, use_dynamic_shifting=False)
 
 # --- Loading Function (Handles NF4, FP8, and default BNB) ---
-def load_models(model_type):
+def load_models(model_type, use_uncensored_llm):
     if not hidream_classes_loaded:
         raise ImportError("Cannot load models: HiDream classes failed to import.")
     if model_type not in MODEL_CONFIGS:
@@ -199,7 +199,10 @@ def load_models(model_type):
     }
     
     if is_nf4:
-        llama_model_name = NF4_LLAMA_MODEL_NAME
+        if use_uncensored_llm:
+            llama_model_name = UNCENSORED_NF4_LLAMA_MODEL_NAME
+        else: 
+            llama_model_name = NF4_LLAMA_MODEL_NAME
         print(f"\n[1a] Preparing LLM (GPTQ): {llama_model_name}")
         if accelerate_available:
             text_encoder_load_kwargs["device_map"] = "auto"
@@ -207,7 +210,10 @@ def load_models(model_type):
         else:
             print("     accelerate not found, attempting manual placement.")
     else:
-        llama_model_name = ORIGINAL_LLAMA_MODEL_NAME
+        if use_uncensored_llm:
+            llama_model_name = UNCENSORED_LLAMA_MODEL_NAME
+        else: 
+            llama_model_name = ORIGINAL_LLAMA_MODEL_NAME
         print(f"\n[1a] Preparing LLM (4-bit BNB): {llama_model_name}")
         if bnb_llm_config:
             text_encoder_load_kwargs["quantization_config"] = bnb_llm_config
@@ -407,6 +413,7 @@ class HiDreamSampler:
         pipe = None
         config = None
         use_uncensored_llm = False
+        cache_key = f"{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
 
         # --- Model Loading / Caching ---
         if model_type in self._model_cache:
