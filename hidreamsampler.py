@@ -341,7 +341,7 @@ class HiDreamSampler:
         print("HiDream: Cache cleared")
         return True
         
-    @classmethod
+    @classmethod@classmethod
     def INPUT_TYPES(s):
         available_model_types = list(MODEL_CONFIGS.keys())
         if not available_model_types:
@@ -366,19 +366,15 @@ class HiDreamSampler:
                 "height": ("INT", {"default": 1024, "min": 512, "max": 2048, "step": 8}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "scheduler": (scheduler_options, {"default": "Default for model"}),
+                "max_sequence_length": ("INT", {"default": 128, "min": 64, "max": 2048}),
                 "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
                 "use_uncensored_llm": ("BOOLEAN", {"default": False})
             }
         }
-        
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
-    FUNCTION = "generate"
-    CATEGORY = "HiDream"
     
     def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler, 
-                 override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
+                 max_sequence_length, override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
         # Monitor initial memory usage
         if torch.cuda.is_available():
             initial_mem = torch.cuda.memory_allocated() / 1024**2
@@ -450,26 +446,46 @@ class HiDreamSampler:
             print("CRITICAL ERROR: Load failed.")
             return (torch.zeros((1, 512, 512, 3)),)
             
-        # --- Update scheduler if requested ---
+        # --- Handle scheduler change ---
+        original_scheduler_class = config["scheduler_class"]
+        original_shift = config["shift"]
+        
         if scheduler != "Default for model":
-            print(f"Replacing default scheduler with: {scheduler}")
-            shift_value = config["shift"]
+            print(f"Replacing default scheduler ({original_scheduler_class}) with: {scheduler}")
+            
+            # Create a completely fresh scheduler instance to avoid any parameter leakage
             if scheduler == "UniPC":
-                pipe.scheduler = get_scheduler_instance("FlowUniPCMultistepScheduler", shift_value)
+                new_scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=original_shift, use_dynamic_shifting=False)
+                pipe.scheduler = new_scheduler
             elif scheduler == "Euler":
-                pipe.scheduler = get_scheduler_instance("FlashFlowMatchEulerDiscreteScheduler", shift_value)
+                new_scheduler = FlashFlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=original_shift, use_dynamic_shifting=False)
+                pipe.scheduler = new_scheduler
             elif scheduler == "Karras Euler":
-                pipe.scheduler = get_scheduler_instance("FlashFlowMatchEulerDiscreteScheduler", shift_value)
-                pipe.scheduler.config.use_karras_sigmas = True
+                new_scheduler = FlashFlowMatchEulerDiscreteScheduler(
+                    num_train_timesteps=1000, 
+                    shift=original_shift, 
+                    use_dynamic_shifting=False,
+                    use_karras_sigmas=True
+                )
+                pipe.scheduler = new_scheduler
             elif scheduler == "Karras Exponential":
-                pipe.scheduler = get_scheduler_instance("FlashFlowMatchEulerDiscreteScheduler", shift_value) 
-                pipe.scheduler.config.use_exponential_sigmas = True
+                new_scheduler = FlashFlowMatchEulerDiscreteScheduler(
+                    num_train_timesteps=1000, 
+                    shift=original_shift,
+                    use_dynamic_shifting=False,
+                    use_exponential_sigmas=True
+                )
+                pipe.scheduler = new_scheduler
+        else:
+            # Ensure we're using the original scheduler as specified in the model config
+            print(f"Using model's default scheduler: {original_scheduler_class}")
+            pipe.scheduler = get_scheduler_instance(original_scheduler_class, original_shift)
                 
         # --- Generation Setup ---
         is_nf4_current = config.get("is_nf4", False)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
-        pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
+        pbar = comfy.utils.ProgressBar(num_inference_steps)
         
         try:
             inference_device = comfy.model_management.get_torch_device()
@@ -492,17 +508,16 @@ class HiDreamSampler:
                 
             print("Executing pipeline inference...")
             with torch.inference_mode():
-                # Updated inference code with negative_prompt and larger max_sequence_length
                 output_images = pipe(
                     prompt=prompt,
-                    negative_prompt=negative_prompt if negative_prompt else None,
+                    negative_prompt=negative_prompt if negative_prompt.strip() else None,
                     height=height,
                     width=width,
                     guidance_scale=guidance_scale,
                     num_inference_steps=num_inference_steps,
                     num_images_per_prompt=1,
                     generator=generator,
-                    max_sequence_length=1024,  # Increased from 128 for longer prompts
+                    max_sequence_length=max_sequence_length,
                 ).images
             print("Pipeline inference finished.")
         except Exception as e:
