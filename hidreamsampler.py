@@ -509,7 +509,6 @@ class HiDreamSampler:
             with torch.inference_mode():
                 output_images = pipe(
                     prompt=prompt,
-                    negative_prompt=negative_prompt.strip() if negative_prompt else None,
                     height=height,
                     width=width,
                     guidance_scale=guidance_scale,
@@ -517,10 +516,6 @@ class HiDreamSampler:
                     num_images_per_prompt=1,
                     generator=generator,
                     max_sequence_length=128,  # Default fallback
-                    max_sequence_length_clip_l=max_length_clip_l,
-                    max_sequence_length_openclip=max_length_openclip,
-                    max_sequence_length_t5=max_length_t5,
-                    max_sequence_length_llama=max_length_llama,
                 ).images
             print("Pipeline inference finished.")
         except Exception as e: 
