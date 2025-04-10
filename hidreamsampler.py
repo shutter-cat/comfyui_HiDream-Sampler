@@ -362,30 +362,23 @@ class HiDreamSampler:
                 "model_type": (available_model_types, {"default": default_model}),
                 "prompt": ("STRING", {"multiline": True, "default": "..."}),
                 "negative_prompt": ("STRING", {"multiline": True, "default": ""}),
-                "width": ("INT", {"default": 1024, "min": 512, "max": 2048, "step": 8}),
-                "height": ("INT", {"default": 1024, "min": 512, "max": 2048, "step": 8}),
+                "width": ("INT", {"default": 1024, "min": 256, "max": 3096, "step": 8}),
+                "height": ("INT", {"default": 1024, "min": 256, "max": 3096, "step": 8}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "scheduler": (scheduler_options, {"default": "Default for model"}),
                 "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
                 "use_uncensored_llm": ("BOOLEAN", {"default": False})
-            },
-            "optional": {
-                "max_length_clip_l": ("INT", {"default": 77, "min": 64, "max": 218}),
-                "max_length_openclip": ("INT", {"default": 77, "min": 64, "max": 218}),
-                "max_length_t5": ("INT", {"default": 128, "min": 64, "max": 512}),
-                "max_length_llama": ("INT", {"default": 128, "min": 64, "max": 2048})
             }
         }
-        
+    
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "generate"
     CATEGORY = "HiDream"
     
-    def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler,
-                 override_steps, override_cfg, use_uncensored_llm=False,
-                 max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128, **kwargs):
+    def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler, 
+                 override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
         # Monitor initial memory usage
         if torch.cuda.is_available():
             initial_mem = torch.cuda.memory_allocated() / 1024**2
@@ -519,8 +512,13 @@ class HiDreamSampler:
                 print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
                 
             print("Executing pipeline inference...")
+            # Hardcoded safe defaults for sequence lengths
+            max_length_clip_l = 77
+            max_length_openclip = 77
+            max_length_t5 = 128
+            max_length_llama = 128
+            
             with torch.inference_mode():
-                # Update pipeline call with individual sequence lengths
                 output_images = pipe(
                     prompt=prompt,
                     negative_prompt=negative_prompt.strip() if negative_prompt else None,
@@ -591,9 +589,291 @@ class HiDreamSampler:
             traceback.print_exc()
             return (torch.zeros((1, height, width, 3)),)
 
+# --- ComfyUI Node 2 Definition ---
+class HiDreamSamplerAdvanced:
+    _model_cache = HiDreamSampler._model_cache  # Share model cache with basic node
+    cleanup_models = HiDreamSampler.cleanup_models  # Share cleanup method
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        available_model_types = list(MODEL_CONFIGS.keys())
+        if not available_model_types:
+            return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
+        default_model = "fast-nf4" if "fast-nf4" in available_model_types else "fast" if "fast" in available_model_types else available_model_types[0]
+        
+        scheduler_options = [
+            "Default for model",
+            "UniPC",
+            "Euler",
+            "Karras Euler",
+            "Karras Exponential"
+        ]
+        
+        return {
+            "required": {
+                "model_type": (available_model_types, {"default": default_model}),
+                "primary_prompt": ("STRING", {"multiline": True, "default": "..."}),
+                "negative_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "width": ("INT", {"default": 1024, "min": 512, "max": 2048, "step": 8}),
+                "height": ("INT", {"default": 1024, "min": 512, "max": 2048, "step": 8}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "scheduler": (scheduler_options, {"default": "Default for model"}),
+                "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
+                "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
+                "use_uncensored_llm": ("BOOLEAN", {"default": False})
+            },
+            "optional": {
+                "clip_l_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "openclip_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "t5_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "llama_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "max_length_clip_l": ("INT", {"default": 77, "min": 64, "max": 218}),
+                "max_length_openclip": ("INT", {"default": 77, "min": 64, "max": 218}),
+                "max_length_t5": ("INT", {"default": 128, "min": 64, "max": 512}),
+                "max_length_llama": ("INT", {"default": 128, "min": 64, "max": 2048})
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "generate"
+    CATEGORY = "HiDream"
+    
+    def generate(self, model_type, primary_prompt, negative_prompt, width, height, seed, scheduler, 
+                 override_steps, override_cfg, use_uncensored_llm=False,
+                 clip_l_prompt="", openclip_prompt="", t5_prompt="", llama_prompt="",
+                 max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128, **kwargs):
+                     
+        # Monitor initial memory usage
+        if torch.cuda.is_available():
+            initial_mem = torch.cuda.memory_allocated() / 1024**2
+            print(f"HiDream: Initial VRAM usage: {initial_mem:.2f} MB")
+            
+        if not MODEL_CONFIGS or model_type == "error":
+            print("HiDream Error: No models loaded.")
+            return (torch.zeros((1, 512, 512, 3)),)
+            
+        pipe = None; config = None
+        
+        # Create cache key that includes uncensored state
+        cache_key = f"{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
+        
+        # --- Model Loading / Caching ---
+        if cache_key in self._model_cache:
+            print(f"Checking cache for {cache_key}...")
+            pipe, config = self._model_cache[cache_key]
+            valid_cache = True
+            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None:
+                valid_cache = False
+                print("Invalid cache, reloading...")
+                del self._model_cache[cache_key]
+                pipe, config = None, None
+            if valid_cache:
+                print("Using cached model.")
+                
+        if pipe is None:
+            if self._model_cache:
+                print(f"Clearing ALL cache before loading {model_type}...")
+                keys_to_del = list(self._model_cache.keys())
+                for key in keys_to_del:
+                    print(f"  Removing '{key}'...")
+                    try:
+                        pipe_to_del, _= self._model_cache.pop(key)
+                        # More aggressive cleanup - clear all major components
+                        if hasattr(pipe_to_del, 'transformer'):
+                            pipe_to_del.transformer = None
+                        if hasattr(pipe_to_del, 'text_encoder_4'):
+                            pipe_to_del.text_encoder_4 = None
+                        if hasattr(pipe_to_del, 'tokenizer_4'):
+                            pipe_to_del.tokenizer_4 = None
+                        if hasattr(pipe_to_del, 'scheduler'):
+                            pipe_to_del.scheduler = None
+                        del pipe_to_del
+                    except Exception as e:
+                        print(f"  Error removing {key}: {e}")
+                # Multiple garbage collection passes
+                for _ in range(3):
+                    gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    # Force synchronization
+                    torch.cuda.synchronize()
+                print("Cache cleared.")
+                
+            print(f"Loading model for {model_type}{' (uncensored)' if use_uncensored_llm else ''}...")
+            try:
+                pipe, config = load_models(model_type, use_uncensored_llm)
+                self._model_cache[cache_key] = (pipe, config)
+                print(f"Model {model_type}{' (uncensored)' if use_uncensored_llm else ''} loaded & cached!")
+            except Exception as e:
+                print(f"!!! ERROR loading {model_type}: {e}")
+                import traceback
+                traceback.print_exc()
+                return (torch.zeros((1, 512, 512, 3)),)
+                
+        if pipe is None or config is None:
+            print("CRITICAL ERROR: Load failed.")
+            return (torch.zeros((1, 512, 512, 3)),)
+            
+        # --- Update scheduler if requested ---
+        original_scheduler_class = config["scheduler_class"]
+        original_shift = config["shift"]
+        
+        if scheduler != "Default for model":
+            print(f"Replacing default scheduler ({original_scheduler_class}) with: {scheduler}")
+            
+            # Create a completely fresh scheduler instance to avoid any parameter leakage
+            if scheduler == "UniPC":
+                new_scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=original_shift, use_dynamic_shifting=False)
+                pipe.scheduler = new_scheduler
+            elif scheduler == "Euler":
+                new_scheduler = FlashFlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=original_shift, use_dynamic_shifting=False)
+                pipe.scheduler = new_scheduler
+            elif scheduler == "Karras Euler":
+                new_scheduler = FlashFlowMatchEulerDiscreteScheduler(
+                    num_train_timesteps=1000, 
+                    shift=original_shift, 
+                    use_dynamic_shifting=False,
+                    use_karras_sigmas=True
+                )
+                pipe.scheduler = new_scheduler
+            elif scheduler == "Karras Exponential":
+                new_scheduler = FlashFlowMatchEulerDiscreteScheduler(
+                    num_train_timesteps=1000, 
+                    shift=original_shift,
+                    use_dynamic_shifting=False,
+                    use_exponential_sigmas=True
+                )
+                pipe.scheduler = new_scheduler
+        else:
+            # Ensure we're using the original scheduler as specified in the model config
+            print(f"Using model's default scheduler: {original_scheduler_class}")
+            pipe.scheduler = get_scheduler_instance(original_scheduler_class, original_shift)
+                
+        # --- Generation Setup ---
+        is_nf4_current = config.get("is_nf4", False)
+        num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
+        guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
+        pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
+        
+        try:
+            inference_device = comfy.model_management.get_torch_device()
+        except Exception:
+            inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            
+        print(f"Creating Generator on: {inference_device}")
+        generator = torch.Generator(device=inference_device).manual_seed(seed)
+        print(f"\n--- Starting Generation ---")
+        print(f"Model: {model_type}{' (uncensored)' if use_uncensored_llm else ''}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        print(f"Sequence lengths - CLIP-L: {max_length_clip_l}, OpenCLIP: {max_length_openclip}, T5: {max_length_t5}, Llama: {max_length_llama}")
+        
+        # --- Run Inference ---
+        output_images = None
+        try:
+            if not is_nf4_current:
+                print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)")
+                pipe.to(inference_device)
+            else:
+                print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
+                
+            print("Executing pipeline inference...")
+            # Use specific prompts for each encoder, falling back to primary prompt if empty
+            prompt_clip_l = clip_l_prompt.strip() if clip_l_prompt.strip() else primary_prompt
+            prompt_openclip = openclip_prompt.strip() if openclip_prompt.strip() else primary_prompt
+            prompt_t5 = t5_prompt.strip() if t5_prompt.strip() else primary_prompt
+            prompt_llama = llama_prompt.strip() if llama_prompt.strip() else primary_prompt
+            
+            print(f"Using per-encoder prompts:")
+            print(f"  CLIP-L ({max_length_clip_l} tokens): {prompt_clip_l[:50]}{'...' if len(prompt_clip_l) > 50 else ''}")
+            print(f"  OpenCLIP ({max_length_openclip} tokens): {prompt_openclip[:50]}{'...' if len(prompt_openclip) > 50 else ''}")
+            print(f"  T5 ({max_length_t5} tokens): {prompt_t5[:50]}{'...' if len(prompt_t5) > 50 else ''}")
+            print(f"  Llama ({max_length_llama} tokens): {prompt_llama[:50]}{'...' if len(prompt_llama) > 50 else ''}")
+            
+            # Call pipeline with encoder-specific prompts
+            with torch.inference_mode():
+                output_images = pipe(
+                    prompt=prompt_clip_l,         # CLIP-L specific prompt
+                    prompt_2=prompt_openclip,     # OpenCLIP specific prompt
+                    prompt_3=prompt_t5,           # T5 specific prompt
+                    prompt_4=prompt_llama,        # Llama specific prompt
+                    negative_prompt=negative_prompt.strip() if negative_prompt else None,
+                    height=height,
+                    width=width,
+                    guidance_scale=guidance_scale,
+                    num_inference_steps=num_inference_steps,
+                    num_images_per_prompt=1,
+                    generator=generator,
+                    max_sequence_length_clip_l=max_length_clip_l,
+                    max_sequence_length_openclip=max_length_openclip,
+                    max_sequence_length_t5=max_length_t5,
+                    max_sequence_length_llama=max_length_llama,
+                ).images
+            print("Pipeline inference finished.")
+        except Exception as e:
+            print(f"!!! ERROR during execution: {e}")
+            import traceback
+            traceback.print_exc()
+            return (torch.zeros((1, height, width, 3)),)
+        finally:
+            pbar.update_absolute(num_inference_steps) # Update pbar regardless
+            
+        print("--- Generation Complete ---")
+        
+        # Robust output handling
+        if output_images is None or len(output_images) == 0:
+            print("ERROR: No images returned. Creating blank image.")
+            return (torch.zeros((1, height, width, 3)),)
+            
+        try:
+            print(f"Processing output image. Type: {type(output_images[0])}")
+            output_tensor = pil2tensor(output_images[0])
+            if output_tensor is None:
+                print("ERROR: pil2tensor returned None. Creating blank image.")
+                return (torch.zeros((1, height, width, 3)),)
+                
+            # Fix for bfloat16 tensor issue
+            if output_tensor.dtype == torch.bfloat16:
+                print("Converting bfloat16 tensor to float32 for ComfyUI compatibility")
+                output_tensor = output_tensor.to(torch.float32)
+                
+            # Verify tensor shape is valid
+            if len(output_tensor.shape) != 4 or output_tensor.shape[0] != 1 or output_tensor.shape[3] != 3:
+                print(f"ERROR: Invalid tensor shape {output_tensor.shape}. Creating blank image.")
+                return (torch.zeros((1, height, width, 3)),)
+                
+            print(f"Output tensor shape: {output_tensor.shape}")
+            
+            # After generating the image, try to clean up any temporary memory
+            try:
+                import comfy.model_management as model_management
+                print("HiDream: Requesting ComfyUI memory cleanup...")
+                model_management.soft_empty_cache()
+            except Exception as e:
+                print(f"HiDream: ComfyUI cleanup failed: {e}")
+                
+            # Log final memory usage
+            if torch.cuda.is_available():
+                final_mem = torch.cuda.memory_allocated() / 1024**2
+                print(f"HiDream: Final VRAM usage: {final_mem:.2f} MB (Change: {final_mem-initial_mem:.2f} MB)")
+                
+            return (output_tensor,)
+        except Exception as e:
+            print(f"Error processing output image: {e}")
+            import traceback
+            traceback.print_exc()
+            return (torch.zeros((1, height, width, 3)),)
+
+
 # --- Node Mappings ---
-NODE_CLASS_MAPPINGS = {"HiDreamSampler": HiDreamSampler}
-NODE_DISPLAY_NAME_MAPPINGS = {"HiDreamSampler": "HiDream Sampler (NF4/BNB)"}
+NODE_CLASS_MAPPINGS = {
+    "HiDreamSampler": HiDreamSampler,
+    "HiDreamSamplerAdvanced": HiDreamSamplerAdvanced
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "HiDreamSampler": "HiDream Sampler",
+    "HiDreamSamplerAdvanced": "HiDream Sampler (Advanced)"
+}
 
 # --- Register with ComfyUI's Memory Management ---
 try:
