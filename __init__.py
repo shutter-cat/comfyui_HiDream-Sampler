@@ -1,11 +1,13 @@
 from .hidreamsampler import HiDreamSampler
 
 NODE_CLASS_MAPPINGS = {
-    "HiDreamSampler": HiDreamSampler
+    "HiDreamSampler": HiDreamSampler,
+    "HiDreamSamplerAdvanced": HiDreamSamplerAdvanced
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "HiDreamSampler": "HiDream Sampler"
+    "HiDreamSampler": "HiDream Sampler",
+    "HiDreamSamplerAdvanced": "HiDream Sampler (Advanced)"
 }
 
 WEB_DIRECTORY = "./web"
