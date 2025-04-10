@@ -10,7 +10,7 @@ A custom ComfyUI node for generating images using the HiDream AI model.
 - Uses 4-bit quantization for lower memory usage.
 
 ## Installation
-Please make sure you have installed Flash Attention. We recommend CUDA versions 12.4 for the manual installation.
+We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. However, if your hardware doesn't support Flash Attention 2 (Such as Turing GPU), we are already implemented SDPA instead, but the generation will be longer.
 
 - Get Flash-Attention 2 wheel from [HuggingFace](https://huggingface.co/lldacing/flash-attention-windows-wheel/blob/main/flash_attn-2.7.4%2Bcu126torch2.6.0cxx11abiFALSE-cp312-cp312-win_amd64.whl) (Python 3.12, PyTorch 2.6.0, cuda 12.6, other available there too)
 - Install it in ComfyUI (.\python_embeded\python.exe -s -m pip install file.whl for portable version)
@@ -31,6 +31,7 @@ Please make sure you have installed Flash Attention. We recommend CUDA versions 
 
 3. Restart ComfyUI.
 
+**If your hardware doesn't support Flash-Attention, we are already implemented SDPA instead, but it's slower.**
 ## Usage
 - Add the HiDreamSampler node to your workflow.
 - Configure inputs:
