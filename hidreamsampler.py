@@ -310,6 +310,7 @@ def pil2tensor(image: Image.Image):
 # --- ComfyUI Node Definition ---
 class HiDreamSampler:
     _model_cache = {}
+    
     @classmethod
     def cleanup_models(cls):
         """Clean up all cached models - can be called by external memory management"""
@@ -372,6 +373,11 @@ class HiDreamSampler:
                 "use_uncensored_llm": ("BOOLEAN", {"default": False})
             }
         }
+        
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "generate"
+    CATEGORY = "HiDream"
     
     def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler, 
                  max_sequence_length, override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
@@ -446,7 +452,7 @@ class HiDreamSampler:
             print("CRITICAL ERROR: Load failed.")
             return (torch.zeros((1, 512, 512, 3)),)
             
-        # --- Handle scheduler change ---
+        # --- Update scheduler if requested ---
         original_scheduler_class = config["scheduler_class"]
         original_shift = config["shift"]
         
@@ -485,7 +491,7 @@ class HiDreamSampler:
         is_nf4_current = config.get("is_nf4", False)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
-        pbar = comfy.utils.ProgressBar(num_inference_steps)
+        pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
         
         try:
             inference_device = comfy.model_management.get_torch_device()
@@ -496,6 +502,7 @@ class HiDreamSampler:
         generator = torch.Generator(device=inference_device).manual_seed(seed)
         print(f"\n--- Starting Generation ---")
         print(f"Model: {model_type}{' (uncensored)' if use_uncensored_llm else ''}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        print(f"Max sequence length: {max_sequence_length}")
         
         # --- Run Inference ---
         output_images = None
@@ -508,9 +515,10 @@ class HiDreamSampler:
                 
             print("Executing pipeline inference...")
             with torch.inference_mode():
+                # Updated inference code with negative_prompt and max_sequence_length
                 output_images = pipe(
                     prompt=prompt,
-                    negative_prompt=negative_prompt if negative_prompt.strip() else None,
+                    negative_prompt=negative_prompt.strip() if negative_prompt else None,
                     height=height,
                     width=width,
                     guidance_scale=guidance_scale,
