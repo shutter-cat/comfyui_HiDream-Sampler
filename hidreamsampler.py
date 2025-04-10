@@ -126,7 +126,7 @@ MODEL_CONFIGS = {
 original_model_count = len(MODEL_CONFIGS)
 if not bnb_available:
     MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_bnb", False)}
-if not optimum_available or not autogptq_available:
+if not optimum_available or not gptqmodel_available:
     MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_gptq_deps", False)}
 if not hidream_classes_loaded:
     MODEL_CONFIGS = {}
@@ -182,8 +182,8 @@ def load_models(model_type, use_uncensored_llm):
     
     if requires_bnb and not bnb_available:
         raise ImportError(f"Model '{model_type}' requires BitsAndBytes...")
-    if requires_gptq_deps and (not optimum_available or not autogptq_available):
-        raise ImportError(f"Model '{model_type}' requires Optimum & AutoGPTQ...")
+    if requires_gptq_deps and (not optimum_available or not gptqmodel_available):
+        raise ImportError(f"Model '{model_type}' requires Optimum & gptqmodel...")
     
     print(f"--- Loading Model Type: {model_type} ---")
     print(f"Model Path: {model_path}")
