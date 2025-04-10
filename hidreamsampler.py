@@ -371,8 +371,8 @@ class HiDreamSampler:
                 "use_uncensored_llm": ("BOOLEAN", {"default": False})
             },
             "optional": {
-                "max_length_clip_l": ("INT", {"default": 77, "min": 64, "max": 150}),
-                "max_length_openclip": ("INT", {"default": 77, "min": 64, "max": 150}),
+                "max_length_clip_l": ("INT", {"default": 77, "min": 64, "max": 218}),
+                "max_length_openclip": ("INT", {"default": 77, "min": 64, "max": 218}),
                 "max_length_t5": ("INT", {"default": 128, "min": 64, "max": 512}),
                 "max_length_llama": ("INT", {"default": 128, "min": 64, "max": 2048})
             }
