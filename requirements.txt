@@ -11,4 +11,4 @@ bitsandbytes>=0.41.0
 # For NF4 models
 optimum>=1.12.0
 accelerate>=0.25.0
-auto-gptq>=0.5.0
+gptqmodel>=2.2.0
