@@ -495,9 +495,9 @@ class HiDreamSampler:
         
         # Define hardcoded sequence lengths BEFORE using them
         max_length_clip_l = 77
-        max_length_openclip = 77
-        max_length_t5 = 128
-        max_length_llama = 128
+        max_length_openclip = 150
+        max_length_t5 = 256
+        max_length_llama = 256
         
         try:
             inference_device = comfy.model_management.get_torch_device()
