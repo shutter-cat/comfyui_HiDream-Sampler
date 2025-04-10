@@ -537,6 +537,10 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 128,
+        max_sequence_length_clip_l: Optional[int] = None,
+        max_sequence_length_openclip: Optional[int] = None,
+        max_sequence_length_t5: Optional[int] = None,
+        max_sequence_length_llama: Optional[int] = None,
     ):
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
