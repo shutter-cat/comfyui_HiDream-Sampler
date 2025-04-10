@@ -377,8 +377,10 @@ class HiDreamSampler:
     FUNCTION = "generate"
     CATEGORY = "HiDream"
     
+    # In basic node
     def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler, 
                  override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
+        print("DEBUG: Basic node generate() called")
         # Monitor initial memory usage
         if torch.cuda.is_available():
             initial_mem = torch.cuda.memory_allocated() / 1024**2
@@ -643,6 +645,7 @@ class HiDreamSamplerAdvanced:
                  override_steps, override_cfg, use_uncensored_llm=False,
                  clip_l_prompt="", openclip_prompt="", t5_prompt="", llama_prompt="",
                  max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128, **kwargs):
+        print("DEBUG: Advanced node generate() called")
                      
         # Monitor initial memory usage
         if torch.cuda.is_available():
