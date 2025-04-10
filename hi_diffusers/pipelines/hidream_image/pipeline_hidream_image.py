@@ -303,6 +303,10 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
         negative_pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
         max_sequence_length: int = 128,
+        max_sequence_length_clip_l: Optional[int] = None,
+        max_sequence_length_openclip: Optional[int] = None,
+        max_sequence_length_t5: Optional[int] = None,
+        max_sequence_length_llama: Optional[int] = None,
         lora_scale: Optional[float] = None,
     ):
         prompt = [prompt] if isinstance(prompt, str) else prompt
@@ -311,6 +315,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         else:
             batch_size = prompt_embeds.shape[0]
 
+        # Pass all sequence length parameters to _encode_prompt
         prompt_embeds, pooled_prompt_embeds = self._encode_prompt(
             prompt = prompt,
             prompt_2 = prompt_2,
@@ -322,6 +327,10 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
             prompt_embeds = prompt_embeds,
             pooled_prompt_embeds = pooled_prompt_embeds,
             max_sequence_length = max_sequence_length,
+            max_sequence_length_clip_l = max_sequence_length_clip_l,
+            max_sequence_length_openclip = max_sequence_length_openclip,
+            max_sequence_length_t5 = max_sequence_length_t5,
+            max_sequence_length_llama = max_sequence_length_llama,
         )
 
         if do_classifier_free_guidance and negative_prompt_embeds is None:
@@ -365,6 +374,10 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                 prompt_embeds = negative_prompt_embeds,
                 pooled_prompt_embeds = negative_pooled_prompt_embeds,
                 max_sequence_length = max_sequence_length,
+                max_sequence_length_clip_l = max_sequence_length_clip_l,
+                max_sequence_length_openclip = max_sequence_length_openclip,
+                max_sequence_length_t5 = max_sequence_length_t5,
+                max_sequence_length_llama = max_sequence_length_llama,
             )
         return prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds
 
@@ -380,8 +393,18 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt_embeds: Optional[List[torch.FloatTensor]] = None,
         pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
         max_sequence_length: int = 128,
+        max_sequence_length_clip_l: Optional[int] = None,
+        max_sequence_length_openclip: Optional[int] = None,
+        max_sequence_length_t5: Optional[int] = None,
+        max_sequence_length_llama: Optional[int] = None,
     ):
         device = device or self._execution_device
+        
+        # Set defaults for individual encoders if not specified
+        clip_l_length = max_sequence_length_clip_l if max_sequence_length_clip_l is not None else max_sequence_length
+        openclip_length = max_sequence_length_openclip if max_sequence_length_openclip is not None else max_sequence_length
+        t5_length = max_sequence_length_t5 if max_sequence_length_t5 is not None else max_sequence_length
+        llama_length = max_sequence_length_llama if max_sequence_length_llama is not None else max_sequence_length
         
         if prompt_embeds is None:
             prompt_2 = prompt_2 or prompt
@@ -398,7 +421,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                 self.text_encoder,
                 prompt = prompt,
                 num_images_per_prompt = num_images_per_prompt,
-                max_sequence_length = max_sequence_length,
+                max_sequence_length = clip_l_length,  # CLIP-L specific length
                 device = device,
                 dtype = dtype,
             )
@@ -408,7 +431,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                 self.text_encoder_2,
                 prompt = prompt_2,
                 num_images_per_prompt = num_images_per_prompt,
-                max_sequence_length = max_sequence_length,
+                max_sequence_length = openclip_length,  # OpenCLIP specific length
                 device = device,
                 dtype = dtype,
             )
@@ -418,14 +441,14 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
             t5_prompt_embeds = self._get_t5_prompt_embeds(
                 prompt = prompt_3,
                 num_images_per_prompt = num_images_per_prompt,
-                max_sequence_length = max_sequence_length,
+                max_sequence_length = t5_length,  # T5 specific length
                 device = device,
                 dtype = dtype
             )
             llama3_prompt_embeds = self._get_llama3_prompt_embeds(
                 prompt = prompt_4,
                 num_images_per_prompt = num_images_per_prompt,
-                max_sequence_length = max_sequence_length,
+                max_sequence_length = llama_length,  # Llama specific length
                 device = device,
                 dtype = dtype
             )
