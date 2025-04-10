@@ -367,10 +367,15 @@ class HiDreamSampler:
                 "height": ("INT", {"default": 1024, "min": 512, "max": 2048, "step": 8}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "scheduler": (scheduler_options, {"default": "Default for model"}),
-                "max_sequence_length": ("INT", {"default": 128, "min": 64, "max": 2048}),
                 "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
                 "use_uncensored_llm": ("BOOLEAN", {"default": False})
+            },
+            "optional": {
+                "max_length_clip_l": ("INT", {"default": 77, "min": 64, "max": 150, "step": 1}),
+                "max_length_openclip": ("INT", {"default": 77, "min": 64, "max": 150, "step": 1}),
+                "max_length_t5": ("INT", {"default": 128, "min": 64, "max": 512, "step": 1}),
+                "max_length_llama": ("INT", {"default": 128, "min": 64, "max": 2048, "step": 1})
             }
         }
         
@@ -380,7 +385,8 @@ class HiDreamSampler:
     CATEGORY = "HiDream"
     
     def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler, 
-                 max_sequence_length, override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
+                 override_steps, override_cfg, use_uncensored_llm=False, 
+                 max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128, **kwargs):
         # Monitor initial memory usage
         if torch.cuda.is_available():
             initial_mem = torch.cuda.memory_allocated() / 1024**2
@@ -502,7 +508,7 @@ class HiDreamSampler:
         generator = torch.Generator(device=inference_device).manual_seed(seed)
         print(f"\n--- Starting Generation ---")
         print(f"Model: {model_type}{' (uncensored)' if use_uncensored_llm else ''}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
-        print(f"Max sequence length: {max_sequence_length}")
+        print(f"Sequence length limits - CLIP-L: {max_length_clip_l}, OpenCLIP: {max_length_openclip}, T5: {max_length_t5}, Llama: {max_length_llama}")
         
         # --- Run Inference ---
         output_images = None
@@ -515,7 +521,42 @@ class HiDreamSampler:
                 
             print("Executing pipeline inference...")
             with torch.inference_mode():
-                # Updated inference code with negative_prompt and max_sequence_length
+                # Patching encode_prompt to use separate max sequence lengths for different encoders
+                original_encode_prompt = pipe.encode_prompt
+                
+                def patched_encode_prompt(*args, **kwargs):
+                    # Save original max_sequence_length if present
+                    original_max_sequence_length = kwargs.get("max_sequence_length", 128)
+                    # Call original function
+                    return original_encode_prompt(*args, **kwargs)
+                
+                # Replace the class methods that handle different encoders
+                original_get_clip_prompt_embeds = pipe._get_clip_prompt_embeds
+                original_get_clip_prompt_embeds2 = None
+                original_get_t5_prompt_embeds = pipe._get_t5_prompt_embeds
+                original_get_llama3_prompt_embeds = pipe._get_llama3_prompt_embeds
+                
+                def patched_get_clip_prompt_embeds(self, tokenizer, text_encoder, *args, **kwargs):
+                    if text_encoder == pipe.text_encoder:  # First CLIP model (CLIP-L)
+                        kwargs["max_sequence_length"] = max_length_clip_l
+                    else:  # Second CLIP model (OpenCLIP)
+                        kwargs["max_sequence_length"] = max_length_openclip
+                    return original_get_clip_prompt_embeds(self, tokenizer, text_encoder, *args, **kwargs)
+                
+                def patched_get_t5_prompt_embeds(self, *args, **kwargs):
+                    kwargs["max_sequence_length"] = max_length_t5
+                    return original_get_t5_prompt_embeds(self, *args, **kwargs)
+                
+                def patched_get_llama3_prompt_embeds(self, *args, **kwargs):
+                    kwargs["max_sequence_length"] = max_length_llama
+                    return original_get_llama3_prompt_embeds(self, *args, **kwargs)
+                
+                # Apply the patches
+                pipe._get_clip_prompt_embeds = patched_get_clip_prompt_embeds.__get__(pipe)
+                pipe._get_t5_prompt_embeds = patched_get_t5_prompt_embeds.__get__(pipe)
+                pipe._get_llama3_prompt_embeds = patched_get_llama3_prompt_embeds.__get__(pipe)
+                
+                # Execute inference with patched methods
                 output_images = pipe(
                     prompt=prompt,
                     negative_prompt=negative_prompt.strip() if negative_prompt else None,
@@ -525,8 +566,13 @@ class HiDreamSampler:
                     num_inference_steps=num_inference_steps,
                     num_images_per_prompt=1,
                     generator=generator,
-                    max_sequence_length=max_sequence_length,
                 ).images
+                
+                # Restore original methods
+                pipe._get_clip_prompt_embeds = original_get_clip_prompt_embeds
+                pipe._get_t5_prompt_embeds = original_get_t5_prompt_embeds
+                pipe._get_llama3_prompt_embeds = original_get_llama3_prompt_embeds
+                
             print("Pipeline inference finished.")
         except Exception as e:
             print(f"!!! ERROR during execution: {e}")
