@@ -406,6 +406,7 @@ class HiDreamSampler:
             return (torch.zeros((1, 512, 512, 3)),)
         pipe = None
         config = None
+        use_uncensored_llm = False
 
         # --- Model Loading / Caching ---
         if model_type in self._model_cache:
