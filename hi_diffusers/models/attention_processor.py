@@ -9,13 +9,25 @@ try:
     from flash_attn_interface import flash_attn_func
     USE_FLASH_ATTN = True
     USE_FLASH_ATTN3 = True
-except ImportError:
+except Exception:
     try:
         from flash_attn import flash_attn_func
         USE_FLASH_ATTN = True
-    except ImportError:
+    except Exception:
         USE_FLASH_ATTN = False
         USE_FLASH_ATTN3 = False
+
+# Check attention
+try:
+    capability = torch.cuda.get_device_capability()
+    major, minor = capability
+    if major < 8:
+        USE_FLASH_ATTN = False
+        USE_FLASH_ATTN3 = False
+except Exception:
+    # AMD GPU
+    USE_FLASH_ATTN = False
+    USE_FLASH_ATTN3 = False
 
 # Copied from https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
