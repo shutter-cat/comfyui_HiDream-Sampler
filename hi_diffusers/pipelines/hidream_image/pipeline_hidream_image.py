@@ -558,7 +558,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         max_sequence_length_t5: Optional[int] = None,
         max_sequence_length_llama: Optional[int] = None,
     ):
-        disable scaling entirely
+        # disable scaling entirely
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
         division = self.vae_scale_factor * 2
