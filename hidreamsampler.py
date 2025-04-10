@@ -380,7 +380,7 @@ class HiDreamSampler:
     # In basic node
     def generate(self, model_type, prompt, negative_prompt, width, height, seed, scheduler, 
                  override_steps, override_cfg, use_uncensored_llm=False, **kwargs):
-        print("DEBUG: Basic node generate() called")
+        
         # Monitor initial memory usage
         if torch.cuda.is_available():
             initial_mem = torch.cuda.memory_allocated() / 1024**2
@@ -488,10 +488,16 @@ class HiDreamSampler:
             pipe.scheduler = get_scheduler_instance(original_scheduler_class, original_shift)
                 
         # --- Generation Setup ---
-        is_nf4_current = config.get("is_nf4", False)
+         is_nf4_current = config.get("is_nf4", False)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
-        pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
+        pbar = comfy.utils.ProgressBar(num_inference_steps)
+        
+        # Define hardcoded sequence lengths BEFORE using them
+        max_length_clip_l = 77
+        max_length_openclip = 77
+        max_length_t5 = 128
+        max_length_llama = 128
         
         try:
             inference_device = comfy.model_management.get_torch_device()
@@ -502,7 +508,7 @@ class HiDreamSampler:
         generator = torch.Generator(device=inference_device).manual_seed(seed)
         print(f"\n--- Starting Generation ---")
         print(f"Model: {model_type}{' (uncensored)' if use_uncensored_llm else ''}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
-        print(f"Sequence lengths - CLIP-L: {max_length_clip_l}, OpenCLIP: {max_length_openclip}, T5: {max_length_t5}, Llama: {max_length_llama}")
+        print(f"Using standard sequence lengths: CLIP-L: {max_length_clip_l}, OpenCLIP: {max_length_openclip}, T5: {max_length_t5}, Llama: {max_length_llama}")
         
         # --- Run Inference ---
         output_images = None
@@ -514,11 +520,6 @@ class HiDreamSampler:
                 print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
                 
             print("Executing pipeline inference...")
-            # Hardcoded safe defaults for sequence lengths
-            max_length_clip_l = 77
-            max_length_openclip = 77
-            max_length_t5 = 128
-            max_length_llama = 128
             
             with torch.inference_mode():
                 output_images = pipe(
