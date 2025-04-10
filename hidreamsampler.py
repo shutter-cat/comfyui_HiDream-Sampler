@@ -407,36 +407,36 @@ class HiDreamSampler:
     FUNCTION = "generate"
     CATEGORY = "HiDream"
     def generate(self, model_type, prompt, fixed_resolution, seed, override_steps, override_cfg, override_width, override_height, **kwargs):
+        print("DEBUG: HiDreamSampler.generate() called")
         if not MODEL_CONFIGS or model_type == "error": 
             print("HiDream Error: No models loaded.")
             return (torch.zeros((1, 512, 512, 3)),)
         pipe = None
         config = None
         use_uncensored_llm = False
-        cache_key = f"{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
-
+        cache_key = f"HiDreamSampler_{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
+        
         # --- Model Loading / Caching ---
-        if model_type in self._model_cache:
-            print(f"Checking cache for {model_type}...")
-            pipe, config = self._model_cache[model_type]
-            valid_cache = True
-            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: 
-                valid_cache = False
-                print("Invalid cache, reloading...")
-                del self._model_cache[model_type]
-                pipe, config = None, None
-            if valid_cache: 
-                print("Using cached model.")
+        if cache_key in self._model_cache:
+                print(f"Checking cache for {cache_key}...")
+                pipe, config = self._model_cache[cache_key]
+                valid_cache = True
+                if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: 
+                    valid_cache = False
+                    print("Invalid cache, reloading...")
+                    del self._model_cache[cache_key]
+                    pipe, config = None, None
+                if valid_cache: 
+                    print("Using cached model.")
 
         if pipe is None:
-            if self._model_cache:
-                print(f"Clearing ALL cache before loading {model_type}...")
+            if self._model_cache and not any(key.startswith(f"HiDreamSampler_{model_type}_") for key in self._model_cache.keys()):
+                print(f"Clearing cache because a different model is cached before loading {model_type}...")
                 keys_to_del = list(self._model_cache.keys())
                 for key in keys_to_del:
                     print(f"  Removing '{key}'...")
                     try:
-                        pipe_to_del, _= self._model_cache.pop(key)
-                        # More aggressive cleanup - clear all major components
+                        pipe_to_del, _ = self._model_cache.pop(key)
                         if hasattr(pipe_to_del, 'transformer'):
                             pipe_to_del.transformer = None
                         if hasattr(pipe_to_del, 'text_encoder_4'):
@@ -448,12 +448,10 @@ class HiDreamSampler:
                         del pipe_to_del
                     except Exception as e:
                         print(f"  Error removing {key}: {e}")
-                # Multiple garbage collection passes
                 for _ in range(3):
                     gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                    # Force synchronization
                     torch.cuda.synchronize()
                 print("Cache cleared.")
                 
@@ -620,8 +618,7 @@ class HiDreamSamplerAdvanced:
                  override_steps, override_cfg, use_uncensored_llm=False,
                  clip_l_prompt="", openclip_prompt="", t5_prompt="", llama_prompt="",
                  max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128, **kwargs):
-        print("DEBUG: Advanced node generate() called")
-                     
+        print("DEBUG: HiDreamSamplerAdvanced.generate() called")             
         # Monitor initial memory usage
         if torch.cuda.is_available():
             initial_mem = torch.cuda.memory_allocated() / 1024**2
@@ -634,24 +631,24 @@ class HiDreamSamplerAdvanced:
         pipe = None; config = None
         
         # Create cache key that includes uncensored state
-        cache_key = f"{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
+        cache_key = f"HiDreamSamplerAdvanced_{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
         
         # --- Model Loading / Caching ---
         if cache_key in self._model_cache:
-            print(f"Checking cache for {cache_key}...")
-            pipe, config = self._model_cache[cache_key]
-            valid_cache = True
-            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None:
-                valid_cache = False
-                print("Invalid cache, reloading...")
-                del self._model_cache[cache_key]
-                pipe, config = None, None
-            if valid_cache:
-                print("Using cached model.")
+                print(f"Checking cache for {cache_key}...")
+                pipe, config = self._model_cache[cache_key]
+                valid_cache = True
+                if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None:
+                    valid_cache = False
+                    print("Invalid cache, reloading...")
+                    del self._model_cache[cache_key]
+                    pipe, config = None, None
+                if valid_cache:
+                    print("Using cached model.")
                 
         if pipe is None:
-            if self._model_cache:
-                print(f"Clearing ALL cache before loading {model_type}...")
+            if self._model_cache and not any(key.startswith(f"HiDreamSamplerAdvanced_{model_type}_") for key in self._model_cache.keys()):
+                print(f"Clearing cache because a different model is cached before loading {model_type}...")
                 keys_to_del = list(self._model_cache.keys())
                 for key in keys_to_del:
                     print(f"  Removing '{key}'...")
@@ -847,6 +844,7 @@ NODE_CLASS_MAPPINGS = {
     "HiDreamSampler": HiDreamSampler,
     "HiDreamSamplerAdvanced": HiDreamSamplerAdvanced
 }
+
 NODE_DISPLAY_NAME_MAPPINGS = {
     "HiDreamSampler": "HiDream Sampler",
     "HiDreamSamplerAdvanced": "HiDream Sampler (Advanced)"
