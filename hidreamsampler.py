@@ -117,89 +117,186 @@ MODEL_CONFIGS = {
         "is_nf4": False, "is_fp8": False, "requires_bnb": True, "requires_gptq_deps": False
     }
 }
+
 # --- Filter models based on available dependencies ---
-# (Keep filtering logic the same)
 original_model_count = len(MODEL_CONFIGS)
-if not bnb_available: MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_bnb", False)}
-if not optimum_available or not autogptq_available: MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_gptq_deps", False)}
-if not hidream_classes_loaded: MODEL_CONFIGS = {}
+if not bnb_available:
+    MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_bnb", False)}
+if not optimum_available or not autogptq_available:
+    MODEL_CONFIGS = {k: v for k, v in MODEL_CONFIGS.items() if not v.get("requires_gptq_deps", False)}
+if not hidream_classes_loaded:
+    MODEL_CONFIGS = {}
+    
 filtered_model_count = len(MODEL_CONFIGS)
-if filtered_model_count == 0: print("*"*70 + "\nCRITICAL ERROR: No HiDream models available...\n" + "*"*70)
-elif filtered_model_count < original_model_count: print("*"*70 + "\nWarning: Some HiDream models disabled...\n" + "*"*70)
+if filtered_model_count == 0:
+    print("*"*70 + "\nCRITICAL ERROR: No HiDream models available...\n" + "*"*70)
+elif filtered_model_count < original_model_count:
+    print("*"*70 + "\nWarning: Some HiDream models disabled...\n" + "*"*70)
+
 # Define BitsAndBytes configs (if available)
-# (Keep definitions the same)
-bnb_llm_config = None; bnb_transformer_4bit_config = None
-if bnb_available: bnb_llm_config = TransformersBitsAndBytesConfig(load_in_4bit=True); bnb_transformer_4bit_config = DiffusersBitsAndBytesConfig(load_in_4bit=True)
+bnb_llm_config = None
+bnb_transformer_4bit_config = None
+if bnb_available:
+    bnb_llm_config = TransformersBitsAndBytesConfig(load_in_4bit=True)
+    bnb_transformer_4bit_config = DiffusersBitsAndBytesConfig(load_in_4bit=True)
+
 model_dtype = torch.bfloat16
+
 # Get available scheduler classes
-# (Keep definitions the same)
-available_schedulers = {};
-if hidream_classes_loaded: available_schedulers = {"FlowUniPCMultistepScheduler": FlowUniPCMultistepScheduler, "FlashFlowMatchEulerDiscreteScheduler": FlashFlowMatchEulerDiscreteScheduler}
+available_schedulers = {}
+if hidream_classes_loaded:
+    available_schedulers = {
+        "FlowUniPCMultistepScheduler": FlowUniPCMultistepScheduler,
+        "FlashFlowMatchEulerDiscreteScheduler": FlashFlowMatchEulerDiscreteScheduler
+    }
+
 # --- Helper: Get Scheduler Instance ---
-# (Keep function the same)
 def get_scheduler_instance(scheduler_name, shift_value):
-    if not available_schedulers: raise RuntimeError("No schedulers available...")
+    if not available_schedulers:
+        raise RuntimeError("No schedulers available...")
+    
     scheduler_class = available_schedulers.get(scheduler_name)
-    if scheduler_class is None: raise ValueError(f"Scheduler class '{scheduler_name}' not found...")
+    if scheduler_class is None:
+        raise ValueError(f"Scheduler class '{scheduler_name}' not found...")
+    
     return scheduler_class(num_train_timesteps=1000, shift=shift_value, use_dynamic_shifting=False)
+
 # --- Loading Function (Handles NF4, FP8, and default BNB) ---
-# (Keep function the same as the last version - it correctly sets up the pipe call now)
 def load_models(model_type):
-    if not hidream_classes_loaded: raise ImportError("Cannot load models: HiDream classes failed to import.")
-    if model_type not in MODEL_CONFIGS: raise ValueError(f"Unknown or incompatible model_type: {model_type}")
+    if not hidream_classes_loaded:
+        raise ImportError("Cannot load models: HiDream classes failed to import.")
+    if model_type not in MODEL_CONFIGS:
+        raise ValueError(f"Unknown or incompatible model_type: {model_type}")
+    
     config = MODEL_CONFIGS[model_type]
-    model_path = config["path"]; is_nf4 = config.get("is_nf4", False)
-    scheduler_name = config["scheduler_class"]; shift = config["shift"]
-    requires_bnb = config.get("requires_bnb", False); requires_gptq_deps = config.get("requires_gptq_deps", False)
-    if requires_bnb and not bnb_available: raise ImportError(f"Model '{model_type}' requires BitsAndBytes...")
-    if requires_gptq_deps and (not optimum_available or not autogptq_available): raise ImportError(f"Model '{model_type}' requires Optimum & AutoGPTQ...")
-    print(f"--- Loading Model Type: {model_type} ---"); print(f"Model Path: {model_path}")
+    model_path = config["path"]
+    is_nf4 = config.get("is_nf4", False)
+    scheduler_name = config["scheduler_class"]
+    shift = config["shift"]
+    requires_bnb = config.get("requires_bnb", False)
+    requires_gptq_deps = config.get("requires_gptq_deps", False)
+    
+    if requires_bnb and not bnb_available:
+        raise ImportError(f"Model '{model_type}' requires BitsAndBytes...")
+    if requires_gptq_deps and (not optimum_available or not autogptq_available):
+        raise ImportError(f"Model '{model_type}' requires Optimum & AutoGPTQ...")
+    
+    print(f"--- Loading Model Type: {model_type} ---")
+    print(f"Model Path: {model_path}")
     print(f"NF4: {is_nf4}, Requires BNB: {requires_bnb}, Requires GPTQ deps: {requires_gptq_deps}")
-    start_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"(Start VRAM: {start_mem:.2f} MB)")
+    
+    start_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+    print(f"(Start VRAM: {start_mem:.2f} MB)")
+    
     # --- 1. Load LLM (Conditional) ---
-    text_encoder_load_kwargs = {"output_hidden_states": True, "low_cpu_mem_usage": True, "torch_dtype": model_dtype,}
+    text_encoder_load_kwargs = {
+        "output_hidden_states": True,
+        "low_cpu_mem_usage": True,
+        "torch_dtype": model_dtype,
+    }
+    
     if is_nf4:
-        llama_model_name = NF4_LLAMA_MODEL_NAME; print(f"\n[1a] Preparing LLM (GPTQ): {llama_model_name}")
-        if accelerate_available: text_encoder_load_kwargs["device_map"] = "auto"; print("     Using device_map='auto'.")
-        else: print("     accelerate not found, attempting manual placement.")
+        llama_model_name = NF4_LLAMA_MODEL_NAME
+        print(f"\n[1a] Preparing LLM (GPTQ): {llama_model_name}")
+        if accelerate_available:
+            text_encoder_load_kwargs["device_map"] = "auto"
+            print("     Using device_map='auto'.")
+        else:
+            print("     accelerate not found, attempting manual placement.")
     else:
-        llama_model_name = ORIGINAL_LLAMA_MODEL_NAME; print(f"\n[1a] Preparing LLM (4-bit BNB): {llama_model_name}")
-        if bnb_llm_config: text_encoder_load_kwargs["quantization_config"] = bnb_llm_config; print("     Using 4-bit BNB.")
-        else: raise ImportError("BNB config required for standard LLM.")
+        llama_model_name = ORIGINAL_LLAMA_MODEL_NAME
+        print(f"\n[1a] Preparing LLM (4-bit BNB): {llama_model_name}")
+        if bnb_llm_config:
+            text_encoder_load_kwargs["quantization_config"] = bnb_llm_config
+            print("     Using 4-bit BNB.")
+        else:
+            raise ImportError("BNB config required for standard LLM.")
+        
         text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
-    print(f"[1b] Loading Tokenizer: {llama_model_name}..."); tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False); print("     Tokenizer loaded.")
-    print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)"); text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
-    if "device_map" not in text_encoder_load_kwargs: print("     Moving text encoder to CUDA..."); text_encoder.to("cuda")
-    step1_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Text encoder loaded! (VRAM: {step1_mem:.2f} MB)")
+    
+    print(f"[1b] Loading Tokenizer: {llama_model_name}...")
+    tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False)
+    print("     Tokenizer loaded.")
+    
+    print(f"[1c] Loading Text Encoder: {llama_model_name}... (May download files)")
+    text_encoder = LlamaForCausalLM.from_pretrained(llama_model_name, **text_encoder_load_kwargs)
+    
+    if "device_map" not in text_encoder_load_kwargs:
+        print("     Moving text encoder to CUDA...")
+        text_encoder.to("cuda")
+    
+    step1_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+    print(f"✅ Text encoder loaded! (VRAM: {step1_mem:.2f} MB)")
+    
     # --- 2. Load Transformer (Conditional) ---
-    print(f"\n[2] Preparing Transformer from: {model_path}"); transformer_load_kwargs = {"subfolder": "transformer", "torch_dtype": model_dtype, "low_cpu_mem_usage": True}
-    if is_nf4: print("     Type: NF4")
-    else: # Default BNB case
+    print(f"\n[2] Preparing Transformer from: {model_path}")
+    transformer_load_kwargs = {
+        "subfolder": "transformer",
+        "torch_dtype": model_dtype,
+        "low_cpu_mem_usage": True
+    }
+    
+    if is_nf4:
+        print("     Type: NF4")
+    else:  # Default BNB case
         print("     Type: Standard (Applying 4-bit BNB quantization)")
         if bnb_transformer_4bit_config:
             transformer_load_kwargs["quantization_config"] = bnb_transformer_4bit_config
         else:
             raise ImportError("BNB config required for transformer but unavailable.")
-    print("     Loading Transformer... (May download files)"); transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
-    print("     Moving Transformer to CUDA..."); transformer.to("cuda")
-    step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
+    
+    print("     Loading Transformer... (May download files)")
+    transformer = HiDreamImageTransformer2DModel.from_pretrained(model_path, **transformer_load_kwargs)
+    print("     Moving Transformer to CUDA...")
+    transformer.to("cuda")
+    
+    step2_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+    print(f"✅ Transformer loaded! (VRAM: {step2_mem:.2f} MB)")
+    
     # --- 3. Load Scheduler ---
-    print(f"\n[3] Preparing Scheduler: {scheduler_name}"); scheduler = get_scheduler_instance(scheduler_name, shift); print(f"     Using Scheduler: {scheduler_name}")
+    print(f"\n[3] Preparing Scheduler: {scheduler_name}")
+    scheduler = get_scheduler_instance(scheduler_name, shift)
+    print(f"     Using Scheduler: {scheduler_name}")
+    
     # --- 4. Load Pipeline ---
-    print(f"\n[4] Loading Pipeline from: {model_path}"); print("     Passing pre-loaded components...")
-    pipe = HiDreamImagePipeline.from_pretrained(model_path, scheduler=scheduler, tokenizer_4=tokenizer, text_encoder_4=text_encoder, transformer=None, torch_dtype=model_dtype, low_cpu_mem_usage=True); print("     Pipeline structure loaded.")
+    print(f"\n[4] Loading Pipeline from: {model_path}")
+    print("     Passing pre-loaded components...")
+    pipe = HiDreamImagePipeline.from_pretrained(
+        model_path,
+        scheduler=scheduler,
+        tokenizer_4=tokenizer,
+        text_encoder_4=text_encoder,
+        transformer=None,
+        torch_dtype=model_dtype,
+        low_cpu_mem_usage=True
+    )
+    print("     Pipeline structure loaded.")
+    
     # --- 5. Final Setup ---
-    print("\n[5] Finalizing Pipeline..."); print("     Assigning transformer..."); pipe.transformer = transformer
-    print("     Moving pipeline object to CUDA (final check)...");
-    try: pipe.to("cuda")
-    except Exception as e: print(f"     Warning: Could not move pipeline object to CUDA: {e}.")
+    print("\n[5] Finalizing Pipeline...")
+    print("     Assigning transformer...")
+    pipe.transformer = transformer
+    
+    print("     Moving pipeline object to CUDA (final check)...")
+    try:
+        pipe.to("cuda")
+    except Exception as e:
+        print(f"     Warning: Could not move pipeline object to CUDA: {e}.")
+    
     if is_nf4:
-        print("     Attempting CPU offload for NF4...");
+        print("     Attempting CPU offload for NF4...")
         if hasattr(pipe, "enable_sequential_cpu_offload"):
-            try: pipe.enable_sequential_cpu_offload(); print("     ✅ CPU offload enabled.")
-            except Exception as e: print(f"     ⚠️ Failed CPU offload: {e}")
-        else: print("     ⚠️ enable_sequential_cpu_offload() not found.")
-    final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0; print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
+            try:
+                pipe.enable_sequential_cpu_offload()
+                print("     ✅ CPU offload enabled.")
+            except Exception as e:
+                print(f"     ⚠️ Failed CPU offload: {e}")
+        else:
+            print("     ⚠️ enable_sequential_cpu_offload() not found.")
+    
+    final_mem = torch.cuda.memory_allocated() / 1024**2 if torch.cuda.is_available() else 0
+    print(f"✅ Pipeline ready! (VRAM: {final_mem:.2f} MB)")
+    
     return pipe, config
     
 # --- Resolution Parsing & Tensor Conversion ---
@@ -275,20 +372,50 @@ def pil2tensor(image: Image.Image):
 class HiDreamSampler:
     _model_cache = {}
     @classmethod
-    def INPUT_TYPES(s): # (Keep method the same)
+    def INPUT_TYPES(s):  # (Keep method the same)
         available_model_types = list(MODEL_CONFIGS.keys())
-        if not available_model_types: return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
+        if not available_model_types:
+            return {"required": {"error": ("STRING", {"default": "No models available...", "multiline": True})}}
+        
         default_model = "fast-nf4" if "fast-nf4" in available_model_types else "fast" if "fast" in available_model_types else available_model_types[0]
-        return {"required": {"model_type": (available_model_types, {"default": default_model}),"prompt": ("STRING", {"multiline": True, "default": "..."}),"fixed_resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),"seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}), "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}), "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),"override_width": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}), "override_height": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),}}
-    RETURN_TYPES = ("IMAGE",); RETURN_NAMES = ("image",); FUNCTION = "generate"; CATEGORY = "HiDream"
+        
+        return {
+            "required": {
+                "model_type": (available_model_types, {"default": default_model}),
+                "prompt": ("STRING", {"multiline": True, "default": "..."}),
+                "fixed_resolution": (RESOLUTION_OPTIONS, {"default": "1024 × 1024 (Square)"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
+                "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
+                "override_width": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),
+                "override_height": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "generate"
+    CATEGORY = "HiDream"
     def generate(self, model_type, prompt, fixed_resolution, seed, override_steps, override_cfg, override_width, override_height, **kwargs):
-        if not MODEL_CONFIGS or model_type == "error": print("HiDream Error: No models loaded."); return (torch.zeros((1, 512, 512, 3)),)
-        pipe = None; config = None
+        if not MODEL_CONFIGS or model_type == "error": 
+            print("HiDream Error: No models loaded.")
+            return (torch.zeros((1, 512, 512, 3)),)
+        pipe = None
+        config = None
+
         # --- Model Loading / Caching ---
         if model_type in self._model_cache:
-            print(f"Checking cache for {model_type}..."); pipe, config = self._model_cache[model_type]; valid_cache = True
-            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: valid_cache = False; print("Invalid cache, reloading..."); del self._model_cache[model_type]; pipe, config = None, None
-            if valid_cache: print("Using cached model.")
+            print(f"Checking cache for {model_type}...")
+            pipe, config = self._model_cache[model_type]
+            valid_cache = True
+            if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None: 
+                valid_cache = False
+                print("Invalid cache, reloading...")
+                del self._model_cache[model_type]
+                pipe, config = None, None
+            if valid_cache: 
+                print("Using cached model.")
+
         if pipe is None:
             if self._model_cache:
                 print(f"Clearing ALL cache before loading {model_type}...")
@@ -314,22 +441,34 @@ class HiDreamSampler:
                 import traceback
                 traceback.print_exc()
                 return (torch.zeros((1, 512, 512, 3)),)
-        if pipe is None or config is None: print("CRITICAL ERROR: Load failed."); return (torch.zeros((1, 512, 512, 3)),)
+
+        if pipe is None or config is None: 
+            print("CRITICAL ERROR: Load failed.")
+            return (torch.zeros((1, 512, 512, 3)),)
         # --- Generation Setup ---
         is_nf4_current = config.get("is_nf4", False)
         
         if override_width and override_height > 0:
             height = override_height
             width = override_width
-        else: height, width = parse_resolution(fixed_resolution)
+        else: 
+            height, width = parse_resolution(fixed_resolution)
 
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
-        try: inference_device = comfy.model_management.get_torch_device()
-        except Exception: inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Creating Generator on: {inference_device}"); generator = torch.Generator(device=inference_device).manual_seed(seed)
-        print(f"\n--- Starting Generation ---"); print(f"Model: {model_type}, Res: {width}x{height}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+
+        try: 
+            inference_device = comfy.model_management.get_torch_device()
+        except Exception: 
+            inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        print(f"Creating Generator on: {inference_device}")
+        generator = torch.Generator(device=inference_device).manual_seed(seed)
+
+        print(f"\n--- Starting Generation ---")
+        print(f"Model: {model_type}, Res: {width}x{height}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
+        
         # --- Run Inference ---
         output_images = None
         try:
@@ -348,7 +487,12 @@ class HiDreamSampler:
                     generator=generator,
                 ).images
             print("Pipeline inference finished.")
-        except Exception as e: print(f"!!! ERROR during execution: {e}"); import traceback; traceback.print_exc(); return (torch.zeros((1, height, width, 3)),)
+        except Exception as e: 
+            print(f"!!! ERROR during execution: {e}")
+            import traceback
+            traceback.print_exc()
+            return (torch.zeros((1, height, width, 3)),)
+
         finally: pbar.update_absolute(num_inference_steps) # Update pbar regardless
         print("--- Generation Complete ---")
         
@@ -378,5 +522,15 @@ class HiDreamSampler:
             return (torch.zeros((1, height, width, 3)),)
         
 # --- Node Mappings ---
-NODE_CLASS_MAPPINGS = {"HiDreamSampler": HiDreamSampler}; NODE_DISPLAY_NAME_MAPPINGS = {"HiDreamSampler": "HiDream Sampler (NF4/FP8/BNB)"}
-print("-" * 50 + "\nHiDream Sampler Node Initialized\nAvailable Models: " + str(list(MODEL_CONFIGS.keys())) + "\n" + "-" * 50) # Compact print
+NODE_CLASS_MAPPINGS = {
+    "HiDreamSampler": HiDreamSampler
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "HiDreamSampler": "HiDream Sampler (NF4/FP8/BNB)"
+}
+
+print("-" * 50 + 
+      "\nHiDream Sampler Node Initialized\nAvailable Models: " + 
+      str(list(MODEL_CONFIGS.keys())) + 
+      "\n" + "-" * 50)  # Compact print
