@@ -488,7 +488,7 @@ class HiDreamSampler:
             pipe.scheduler = get_scheduler_instance(original_scheduler_class, original_shift)
                 
         # --- Generation Setup ---
-         is_nf4_current = config.get("is_nf4", False)
+        is_nf4_current = config.get("is_nf4", False)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps)
