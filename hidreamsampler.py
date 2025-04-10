@@ -24,11 +24,12 @@ except ImportError:
     accelerate_available = False
     print("Warning: accelerate not installed. device_map='auto' for GPTQ models will not be available.")
 try:
-    import auto_gptq
-    autogptq_available = True
+    import gptqmodel
+    gptqmodel_available = True
 except ImportError:
-    autogptq_available = False
-    # Note: Optimum might still load GPTQ without auto-gptq if using ExLlama kernels,
+    gptqmodel_available = False
+    print("Warning: GPTQModel not installed.")
+    # Note: Optimum might still load GPTQ without GPTQModel if using ExLlama kernels,
     # but it's often required. Add a warning if NF4 models are selected later.
 try:
     import optimum
