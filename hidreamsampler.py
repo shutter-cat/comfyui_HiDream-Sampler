@@ -15,7 +15,9 @@ import comfy.utils
 import gc
 import os # For checking paths if needed
 import huggingface_hub
+import importlib.util
 from safetensors.torch import load_file
+
 # --- Optional Dependency Handling ---
 try:
     import accelerate
@@ -197,7 +199,8 @@ def load_models(model_type, use_uncensored_llm):
         "low_cpu_mem_usage": True,
         "torch_dtype": model_dtype,
     }
-    
+    try:
+        from flashattention
     if is_nf4:
         if use_uncensored_llm:
             llama_model_name = UNCENSORED_NF4_LLAMA_MODEL_NAME
@@ -221,7 +224,7 @@ def load_models(model_type, use_uncensored_llm):
         else:
             raise ImportError("BNB config required for standard LLM.")
         
-        text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
+        text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if importlib.util.find_spec("flash_attn") else "eager"
     
     print(f"[1b] Loading Tokenizer: {llama_model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False)
