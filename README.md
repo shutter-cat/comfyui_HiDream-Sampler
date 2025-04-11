@@ -1,9 +1,9 @@
 ## Updates 11.04.
 
-- Added Image2image functionality from [SanDiegoDude](https://github.com/SanDiegoDude)
+- Added Image2image functionality
 - Fixed: Not require auto-gptq anymore! Make sure to git pull and pip install -r requirements.txt!
 - Flash Attention is no longer needed thanks to [power88](https://github.com/power88)
-- added uncesored Llama Support
+- added uncesored Llama Support (Available via HiDream Sampler Advanced)
 
 ![image](sample_workflow/workflow.png)
 
