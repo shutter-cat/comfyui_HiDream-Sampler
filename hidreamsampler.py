@@ -199,8 +199,6 @@ def load_models(model_type, use_uncensored_llm):
         "low_cpu_mem_usage": True,
         "torch_dtype": model_dtype,
     }
-    try:
-        from flashattention
     if is_nf4:
         if use_uncensored_llm:
             llama_model_name = UNCENSORED_NF4_LLAMA_MODEL_NAME
