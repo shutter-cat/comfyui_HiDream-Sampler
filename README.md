@@ -36,7 +36,30 @@ A custom ComfyUI node for generating images using the HiDream AI model.
 - Uses 4-bit quantization for lower memory usage.
 
 ## Installation
-We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. However, if your hardware doesn't support Flash Attention 2 (Such as Turing GPU), we are already implemented SDPA instead, but the generation will be longer.
+### Basic installation.
+1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
+   ```bash
+   git clone https://github.com/lum3on/comfyui_HiDream-Sampler ComfyUI/custom_nodes/comfui_HiDream-Sampler
+   ```
+
+2. Install requirements
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3. Restart ComfyUI.
+
+### Attention Installation
+We've implemented four attention modules considering different hardware: FlashAttention 3, FlashAttention 2, SageAttention and Pytorch SDPA.
+
+| Attention Module         | GPU                |
+|------------------------|---------------------------|
+| Flash-Attention 3       | NVIDIA Hopper GPU  |
+| Flash-Attention 2       | NVIDIA Ampere GPU and above   |
+| SageAttention 1         | NVIDIA CUDA GPU  |
+| PyTorch SDPA | GPUs which support pytorch 2 (Including AMD GPU, Intel GPU)   |
+
+We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. Here's steps to install Flash-Attention 2:
 
 - Get Flash-Attention 2 wheel from [HuggingFace](https://huggingface.co/lldacing/flash-attention-windows-wheel/blob/main/flash_attn-2.7.4%2Bcu126torch2.6.0cxx11abiFALSE-cp312-cp312-win_amd64.whl) (Python 3.12, PyTorch 2.6.0, cuda 12.6, other available there too)
 - Install it in ComfyUI (.\python_embeded\python.exe -s -m pip install file.whl for portable version)
@@ -47,17 +70,14 @@ We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. 
 
 (If you don't want to install random wheel, you can take it from [from here](https://github.com/Foul-Tarnished/flash-attention/actions) (it should create a [release](https://github.com/Foul-Tarnished/flash-attention/releases) once it finish, which should take ~2 hours on GitHub CI))
 
-1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
-   ```bash
-   git clone https://github.com/lum3on/comfyui_HiDream-Sampler ComfyUI/custom_nodes/comfui_HiDream-Sampler
+Steps to install SageAttention 1:
 
-2. Install requirements
-    ```bash
-    pip install -r requirements.txt
+```bash
+.\python_embeded\python.exe -s -m pip install sageattention==1.0.6
+```
+PyTorch SDPA is automantically installed when you install pytorch 2 (ComfyUI Requirement). 
 
-3. Restart ComfyUI.
 
-**If your hardware doesn't support Flash-Attention, we are already implemented SDPA instead, but it's slower.**
 ## Usage
 - Add the HiDreamSampler node to your workflow.
 - Configure inputs:
