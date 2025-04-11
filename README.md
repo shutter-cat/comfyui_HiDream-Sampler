@@ -39,7 +39,7 @@ A custom ComfyUI node for generating images using the HiDream AI model.
 ### Basic installation.
 1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
    ```bash
-   git clone https://github.com/lum3on/comfyui_HiDream-Sampler ComfyUI/custom_nodes/comfui_HiDream-Sampler
+   git clone https://github.com/lum3on/comfyui_HiDream-Sampler ComfyUI/custom_nodes/comfyui_HiDream-Sampler
    ```
 
 2. Install requirements
