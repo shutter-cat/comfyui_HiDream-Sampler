@@ -81,7 +81,7 @@ ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" # For origina
 NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4" # For NF4
 # Add uncensored model paths (using the same model as NF4 since it's less censored)
 UNCENSORED_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4" 
-UNCENSORED_NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
+UNCENSORED_NF4_LLAMA_MODEL_NAME = "John6666/Llama-3.1-8B-Lexi-Uncensored-V2-nf4"
 # --- Model Configurations ---
 # Added flags for dependency checks
 MODEL_CONFIGS = {

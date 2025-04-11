@@ -3,6 +3,7 @@
 - Added Image2image functionality
 - Fixed: Not require auto-gptq anymore! Make sure to git pull and pip install -r requirements.txt!
 - Flash Attention is no longer needed thanks to [power88](https://github.com/power88)
+- added uncesored Llama Support
 
 ![image](sample_workflow/workflow.png)
 
@@ -61,7 +62,7 @@ Here's some weight that you need to download (Which will be automantically downl
 | Model | Huggingface repo | 
 |------------------------|---------------------------|
 | 4-bit Llama text encoder       | hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4  | 
-| Uncensored 4-bit Llama text encoder      | hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4  | 
+| Uncensored 4-bit Llama text encoder      | John6666/Llama-3.1-8B-Lexi-Uncensored-V2-nf4  | 
 | Original Llama text encoder       | nvidia/Llama-3.1-Nemotron-Nano-8B-v1  | 
 
 - Quantized Diffusion models (Thanks to `azaneko` for the quantized model!)
