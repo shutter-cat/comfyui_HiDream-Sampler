@@ -4,7 +4,7 @@
 - Fixed: Not require auto-gptq anymore! Make sure to git pull and pip install -r requirements.txt!
 - Flash Attention is no longer needed thanks to [power88](https://github.com/power88)
 
-![image](https://github.com/user-attachments/assets/42ae28d2-5170-4955-894d-e5458784e22a)
+![image](sample_workflow/workflow.png)
 
 # HiDreamSampler for ComfyUI
 
