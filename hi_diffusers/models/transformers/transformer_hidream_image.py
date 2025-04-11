@@ -40,7 +40,6 @@ class HiDreamImageSingleTransformerBlock(nn.Module):
         attention_head_dim: int,
         num_routed_experts: int = 4,
         num_activated_experts: int = 2,
-        attn_impl: str = "sdpa"
     ):
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -57,7 +56,7 @@ class HiDreamImageSingleTransformerBlock(nn.Module):
             query_dim=dim,
             heads=num_attention_heads,
             dim_head=attention_head_dim,
-            processor = HiDreamAttnProcessor_flashattn(attn_impl=attn_impl),
+            processor = HiDreamAttnProcessor_flashattn(),
             single = True
         )
 
@@ -112,7 +111,6 @@ class HiDreamImageTransformerBlock(nn.Module):
         attention_head_dim: int,
         num_routed_experts: int = 4,
         num_activated_experts: int = 2,
-        attn_impl: str = "sdpa"
     ):
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -130,7 +128,7 @@ class HiDreamImageTransformerBlock(nn.Module):
             query_dim=dim,
             heads=num_attention_heads,
             dim_head=attention_head_dim,
-            processor = HiDreamAttnProcessor_flashattn(attn_impl=attn_impl),
+            processor = HiDreamAttnProcessor_flashattn(),
             single = False
         )
 
@@ -198,7 +196,6 @@ class HiDreamImageBlock(nn.Module):
         attention_head_dim: int,
         num_routed_experts: int = 4,
         num_activated_experts: int = 2,
-        attn_impl:str = "sdpa",
         block_type: BlockType = BlockType.TransformerBlock,
     ):
         super().__init__()
@@ -212,7 +209,6 @@ class HiDreamImageBlock(nn.Module):
             attention_head_dim,
             num_routed_experts,
             num_activated_experts,
-            self.attn_impl
         )
     
     def forward(
@@ -254,7 +250,6 @@ class HiDreamImageTransformer2DModel(
         axes_dims_rope: Tuple[int, int] = (32, 32),
         max_resolution: Tuple[int, int] = (128, 128),
         llama_layers: List[int] = None, 
-        attn_impl: str = "sdpa"
     ):
         super().__init__()
         self.out_channels = out_channels or in_channels
@@ -279,7 +274,6 @@ class HiDreamImageTransformer2DModel(
                     num_routed_experts = num_routed_experts,
                     num_activated_experts = num_activated_experts,
                     block_type = BlockType.TransformerBlock,
-                    attn_impl = self.attn_impl
                 )
                 for i in range(self.config.num_layers)
             ]
