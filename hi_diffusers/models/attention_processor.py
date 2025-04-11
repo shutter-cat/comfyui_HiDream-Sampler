@@ -5,21 +5,6 @@ from .attention import HiDreamAttention
 USE_FLASH_ATTN = False
 USE_FLASH_ATTN3 = False
 
-try:
-    try:
-        from flash_attn_interface import flash_attn_func
-        attention = "FlashAttention3"
-    except ImportError:
-        from flash_attn import flash_attn_func
-        attention = "FlashAttention2"
-except ImportError:
-    try:
-        from sageattention import sageattn
-        attention = "SageAttention"
-    except ImportError:
-        attention = "sdpa"
-
-
 
 # Copied from https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -30,17 +15,41 @@ def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> t
     return xq_out.reshape(*xq.shape).type_as(xq), xk_out.reshape(*xk.shape).type_as(xk)
 
 def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
+    # Check if we've already determined the attention type
+    if not hasattr(attention, "_attention_type"):
+        # Determine which attention implementation to use
+        attention_type = "sdpa"  # default
+        
+        try:
+            import importlib.util
+            if importlib.util.find_spec("flash_attn_interface"):
+                attention_type = "FlashAttention3"
+            elif importlib.util.find_spec("flash_attn"):
+                attention_type = "FlashAttention2"
+            elif importlib.util.find_spec("sageattention"):
+                attention_type = "SageAttention"
+        except:
+            pass
+        
+        # Cache the result
+        attention._attention_type = attention_type
+        print(f"using {attention_type}")
+    
+    # Get the cached attention type
+    attention_type = attention._attention_type
 
-    # "sdpa", "SageAttention", "FlashAttention2", "FlashAttention3"
-    if attention == "FlashAttention3":
+    
+    # Execute the appropriate attention implementation
+    if attention_type == "FlashAttention3":
+        from flash_attn_interface import flash_attn_func
         hidden_states = flash_attn_func(query, key, value, causal=False, deterministic=False)[0]
-    elif attention == "FlashAttention2":
+    elif attention_type == "FlashAttention2":
+        from flash_attn import flash_attn_func
         hidden_states = flash_attn_func(query, key, value, dropout_p=0., causal=False)
-    elif attention == "sdpa":
-        # use sdpa attention fallback
+    elif attention_type == "sdpa":
         q = query.transpose(1, 2)  
         k = key.transpose(1, 2)    
-        v = value.transpose(1, 2)  # [B, H, N, D]
+        v = value.transpose(1, 2)
         
         hidden_states = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, 
@@ -49,10 +58,11 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
             is_causal=False
         )
         hidden_states = hidden_states.transpose(1, 2)
-    elif attention == "SageAttention":
+    elif attention_type == "SageAttention":
+        from sageattention import sageattn
         hidden_states = sageattn(query, key, value, tensor_layout="NHD", is_causal=False)
     else:
-        assert ValueError("There's something wrong with attention.")
+        raise ValueError("Invalid attention implementation")
 
     hidden_states = hidden_states.flatten(-2)
     hidden_states = hidden_states.to(query.dtype)
