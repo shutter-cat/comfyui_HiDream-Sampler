@@ -5,29 +5,6 @@ from .attention import HiDreamAttention
 USE_FLASH_ATTN = False
 USE_FLASH_ATTN3 = False
 
-try:
-    from flash_attn_interface import flash_attn_func
-    USE_FLASH_ATTN = True
-    USE_FLASH_ATTN3 = True
-except Exception:
-    try:
-        from flash_attn import flash_attn_func
-        USE_FLASH_ATTN = True
-    except Exception:
-        USE_FLASH_ATTN = False
-        USE_FLASH_ATTN3 = False
-
-# Check attention
-try:
-    capability = torch.cuda.get_device_capability()
-    major, minor = capability
-    if major < 8:
-        USE_FLASH_ATTN = False
-        USE_FLASH_ATTN3 = False
-except Exception:
-    # AMD GPU
-    USE_FLASH_ATTN = False
-    USE_FLASH_ATTN3 = False
 
 # Copied from https://github.com/black-forest-labs/flux/blob/main/src/flux/math.py
 def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -38,15 +15,41 @@ def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> t
     return xq_out.reshape(*xq.shape).type_as(xq), xk_out.reshape(*xk.shape).type_as(xk)
 
 def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
-    if USE_FLASH_ATTN3:
+    # Check if we've already determined the attention type
+    if not hasattr(attention, "_attention_type"):
+        # Determine which attention implementation to use
+        attention_type = "sdpa"  # default
+        
+        try:
+            import importlib.util
+            if importlib.util.find_spec("flash_attn_interface"):
+                attention_type = "FlashAttention3"
+            elif importlib.util.find_spec("flash_attn"):
+                attention_type = "FlashAttention2"
+            elif importlib.util.find_spec("sageattention"):
+                attention_type = "SageAttention"
+        except:
+            pass
+        
+        # Cache the result
+        attention._attention_type = attention_type
+        print(f"using {attention_type}")
+    
+    # Get the cached attention type
+    attention_type = attention._attention_type
+
+    
+    # Execute the appropriate attention implementation
+    if attention_type == "FlashAttention3":
+        from flash_attn_interface import flash_attn_func
         hidden_states = flash_attn_func(query, key, value, causal=False, deterministic=False)[0]
-    elif USE_FLASH_ATTN:
+    elif attention_type == "FlashAttention2":
+        from flash_attn import flash_attn_func
         hidden_states = flash_attn_func(query, key, value, dropout_p=0., causal=False)
-    else:
-        # use sdpa attention fallback
+    elif attention_type == "sdpa":
         q = query.transpose(1, 2)  
         k = key.transpose(1, 2)    
-        v = value.transpose(1, 2)  # [B, H, N, D]
+        v = value.transpose(1, 2)
         
         hidden_states = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, 
@@ -55,12 +58,15 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
             is_causal=False
         )
         hidden_states = hidden_states.transpose(1, 2)
+    elif attention_type == "SageAttention":
+        from sageattention import sageattn
+        hidden_states = sageattn(query, key, value, tensor_layout="NHD", is_causal=False)
+    else:
+        raise ValueError("Invalid attention implementation")
 
     hidden_states = hidden_states.flatten(-2)
     hidden_states = hidden_states.to(query.dtype)
     return hidden_states
-
-
 
 class HiDreamAttnProcessor_flashattn:
     """Attention processor used typically in processing the SD3-like self-attention projections."""

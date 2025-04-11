@@ -36,9 +36,32 @@ A custom ComfyUI node for generating images using the HiDream AI model.
 - Uses 4-bit quantization for lower memory usage.
 
 ## Installation
-We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. However, if your hardware doesn't support Flash Attention 2 (Such as Turing GPU), we are already implemented SDPA instead, but the generation will be longer.
+### Basic installation.
+1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
+   ```bash
+   git clone https://github.com/lum3on/comfyui_HiDream-Sampler ComfyUI/custom_nodes/comfui_HiDream-Sampler
+   ```
 
-- Get Flash-Attention 2 wheel from [HuggingFace](https://huggingface.co/lldacing/flash-attention-windows-wheel/blob/main/flash_attn-2.7.4%2Bcu126torch2.6.0cxx11abiFALSE-cp312-cp312-win_amd64.whl) (Python 3.12, PyTorch 2.6.0, cuda 12.6, other available there too)
+2. Install requirements
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3. Restart ComfyUI.
+
+### Attention Installation
+We've implemented four attention modules considering different hardware: FlashAttention 3, FlashAttention 2, SageAttention and Pytorch SDPA.
+
+| Attention Module         | GPU                |
+|------------------------|---------------------------|
+| Flash-Attention 3       | NVIDIA Hopper GPU  |
+| Flash-Attention 2       | NVIDIA Ampere GPU and above   |
+| SageAttention 1         | NVIDIA CUDA GPU  |
+| PyTorch SDPA | GPUs which support pytorch 2 (Including AMD GPU, Intel GPU)   |
+
+We strongly recommend to install Flash Attention 2 with CUDA versions 12.4. Here's steps to install Flash-Attention 2:
+
+- Get Flash-Attention 2 wheel from [HuggingFace](https://hf-mirror.com/lldacing/flash-attention-windows-wheel/tree/main)
 - Install it in ComfyUI (.\python_embeded\python.exe -s -m pip install file.whl for portable version)
 - Install accelerate .\python_embeded\python.exe -s -m pip install accelerate>=0.26.0
 - Install this node with ComfyManager (or manually, don't forget to call python_embeded etc for portable version)
@@ -47,17 +70,76 @@ We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. 
 
 (If you don't want to install random wheel, you can take it from [from here](https://github.com/Foul-Tarnished/flash-attention/actions) (it should create a [release](https://github.com/Foul-Tarnished/flash-attention/releases) once it finish, which should take ~2 hours on GitHub CI))
 
-1. Clone this repository into your `ComfyUI/custom_nodes/` directory:
-   ```bash
-   git clone https://github.com/lum3on/comfyui_HiDream-Sampler ComfyUI/custom_nodes/comfui_HiDream-Sampler
+Steps to install SageAttention 1:
+- Install triton.
+Windows built wheel, [download here](https://huggingface.co/madbuda/triton-windows-builds):
+```bash
+.\python_embeded\python.exe -s -m pip install (Your downloaded whl package)
+```
+linux:
+```bash
+python3 -m pip install triton
+```
 
-2. Install requirements
-    ```bash
-    pip install -r requirements.txt
+- Install sageattention package
+```bash
+.\python_embeded\python.exe -s -m pip install sageattention==1.0.6
+```
+PyTorch SDPA is automantically installed when you install PyTorch 2 (ComfyUI Requirement). However, if your torch version is lower than 2. Use this command to update to the latest version.
+- linux
+```
+python3 -m pip install torch torchvision torchaudio
+```
+- windows
+```
+.\python_embeded\python.exe -s -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
 
-3. Restart ComfyUI.
+## Download the weights
+Here's some weight that you need to download (Which will be automantically downloaded when running workflow). Please use huggingface-cli to download.
+- Llama Text Encoder
 
-**If your hardware doesn't support Flash-Attention, we are already implemented SDPA instead, but it's slower.**
+| Model | Huggingface repo | 
+|------------------------|---------------------------|
+| 4-bit Llama text encoder       | hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4  | 
+| Uncensored 4-bit Llama text encoder      | hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4  | 
+| Original Llama text encoder       | nvidia/Llama-3.1-Nemotron-Nano-8B-v1  | 
+
+- Quantized Diffusion models (Thanks to `azaneko` for the quantized model!)
+
+| Model | Huggingface repo | 
+|------------------------|---------------------------|
+| 4-bit HiDream Full       | azaneko/HiDream-I1-Full-nf4  | 
+| 4-bit HiDream Dev       | azaneko/HiDream-I1-Dev-nf4  | 
+| 4-bit HiDream Fast       | azaneko/HiDream-I1-Fast-nf4  | 
+
+- Full weight diffusion model (optional, not recommend unless you have high VRAM)
+
+| Model | Huggingface repo | 
+|------------------------|---------------------------|
+| HiDream Full       | HiDream-ai/HiDream-I1-Full  | 
+| HiDream Dev       | HiDream-ai/HiDream-I1-Dev  | 
+| HiDream Fast       | HiDream-ai/HiDream-I1-Fast  | 
+
+You can download these weights by this command.
+```shell
+huggingface-cli download (Huggingface repo)
+```
+For some region that cannot connect to huggingface. Use this command for mirror.
+
+Windows CMD
+```shell
+set HF_ENDPOINT=https://hf-mirror.com
+```
+Windows Powershell
+```shell
+$env:HF_ENDPOINT = "https://hf-mirror.com"
+```
+Linux
+```shell
+export HF_ENDPOINT=https://hf-mirror.com
+```
+
 ## Usage
 - Add the HiDreamSampler node to your workflow.
 - Configure inputs:
@@ -70,7 +152,7 @@ We strongly recommend you to install Flash Attention 2 with CUDA versions 12.4. 
 
 ## Requirements
 - ComfyUI
-- CUDA-enabled GPU (for model inference)
+- GPU (for model inference)
 
 ## Notes
 Models are cached after the first load to improve performance and use 4-bit quantization models from https://github.com/hykilpikonna/HiDream-I1-nf4.

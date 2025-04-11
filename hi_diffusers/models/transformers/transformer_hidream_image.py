@@ -39,7 +39,7 @@ class HiDreamImageSingleTransformerBlock(nn.Module):
         num_attention_heads: int,
         attention_head_dim: int,
         num_routed_experts: int = 4,
-        num_activated_experts: int = 2
+        num_activated_experts: int = 2,
     ):
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -110,7 +110,7 @@ class HiDreamImageTransformerBlock(nn.Module):
         num_attention_heads: int,
         attention_head_dim: int,
         num_routed_experts: int = 4,
-        num_activated_experts: int = 2
+        num_activated_experts: int = 2,
     ):
         super().__init__()
         self.num_attention_heads = num_attention_heads
@@ -208,7 +208,7 @@ class HiDreamImageBlock(nn.Module):
             num_attention_heads,
             attention_head_dim,
             num_routed_experts,
-            num_activated_experts
+            num_activated_experts,
         )
     
     def forward(
@@ -273,7 +273,7 @@ class HiDreamImageTransformer2DModel(
                     attention_head_dim = self.config.attention_head_dim,
                     num_routed_experts = num_routed_experts,
                     num_activated_experts = num_activated_experts,
-                    block_type = BlockType.TransformerBlock
+                    block_type = BlockType.TransformerBlock,
                 )
                 for i in range(self.config.num_layers)
             ]

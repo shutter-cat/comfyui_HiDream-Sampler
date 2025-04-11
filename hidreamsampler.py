@@ -15,7 +15,9 @@ import comfy.utils
 import gc
 import os # For checking paths if needed
 import huggingface_hub
+import importlib.util
 from safetensors.torch import load_file
+
 # --- Optional Dependency Handling ---
 try:
     import accelerate
@@ -197,7 +199,6 @@ def load_models(model_type, use_uncensored_llm):
         "low_cpu_mem_usage": True,
         "torch_dtype": model_dtype,
     }
-    
     if is_nf4:
         if use_uncensored_llm:
             llama_model_name = UNCENSORED_NF4_LLAMA_MODEL_NAME
@@ -221,7 +222,7 @@ def load_models(model_type, use_uncensored_llm):
         else:
             raise ImportError("BNB config required for standard LLM.")
         
-        text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if hasattr(torch.nn.functional, 'scaled_dot_product_attention') else "eager"
+        text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2" if importlib.util.find_spec("flash_attn") else "eager"
     
     print(f"[1b] Loading Tokenizer: {llama_model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False)
@@ -242,7 +243,7 @@ def load_models(model_type, use_uncensored_llm):
     transformer_load_kwargs = {
         "subfolder": "transformer",
         "torch_dtype": model_dtype,
-        "low_cpu_mem_usage": True
+        "low_cpu_mem_usage": True,
     }
     
     if is_nf4:
@@ -314,6 +315,7 @@ RESOLUTION_OPTIONS = [ # (Keep list the same)
     "880 × 1168 (Portrait)","1168 × 880 (Landscape)","1248 × 832 (Landscape)",
     "832 × 1248 (Portrait)"
 ]
+
 def parse_resolution(resolution_str):
     """Parse resolution string into height and width dimensions."""
     try:
@@ -398,7 +400,7 @@ class HiDreamSampler:
                 "override_steps": ("INT", {"default": -1, "min": -1, "max": 100}),
                 "override_cfg": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 20.0, "step": 0.1}),
                 "override_width": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),
-                "override_height": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8}),
+                "override_height": ("INT", {"default": 0, "min": 0, "max": 2048, "step": 8})
             }
         }
     
