@@ -14,14 +14,7 @@ bitsandbytes>=0.41.0
 # For NF4/GPTQ models (e.g., 'full-nf4', 'dev-nf4', 'fast-nf4')
 optimum>=1.12.0
 accelerate>=0.25.0
-# --- Backend for Optimum/GPTQ ---
-# Optimum requires a backend library to run GPTQ models.
-# Install *at least one* of the following that works in your environment:
-# Option 1: auto-gptq (Common, but may have CUDA build issues)
-# auto-gptq>=0.5.0
-# Option 2: ExLlama support (Often recommended)
-# optimum[exllama] # Installs optimum + exllama requirements
-# Option 3: gptqmodel (Found necessary in some setups)
+sageattention
 gptqmodel>=2.0.0 # Add this based on user feedback
 
     
