@@ -66,68 +66,6 @@
       "bgcolor": "#353"
     },
     {
-      "id": 19,
-      "type": "HiDreamSamplerAdvanced",
-      "pos": [
-        0,
-        -180
-      ],
-      "size": [
-        360,
-        810
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "primary_prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "primary_prompt"
-          },
-          "link": 37
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "links": [
-            28
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "HiDreamSamplerAdvanced",
-        "aux_id": "SanDiegoDude/ComfyUI-HiDream-Sampler",
-        "ver": "7f3d4bbddbfca35aa84e9c386a94a1ce846bcc57"
-      },
-      "widgets_values": [
-        "dev-nf4",
-        "A collectable rare postage stamp with the text \"US Postal Service\" and the year \"1918\" and the price of 15 cents, featuring a US WW1 Soldier peeking over the top of a trench, stamp collection",
-        "deformed, ugly, watermark, text, scribbles, noise, static, low quality, bad quality, jpeg artifacts, low resolution",
-        1280,
-        1280,
-        1001,
-        "fixed",
-        "UniPC",
-        -1,
-        -1,
-        false,
-        "painted by Georgia O'Keefe",
-        "painted by Georgia O'Keefe",
-        "painted by Georgia O'Keefe",
-        "",
-        77,
-        150,
-        256,
-        256
-      ],
-      "color": "#2a363b",
-      "bgcolor": "#3f5159"
-    },
-    {
       "id": 2,
       "type": "PreviewImage",
       "pos": [
@@ -154,62 +92,11 @@
         "cnr_id": "comfy-core",
         "ver": "0.3.27"
       },
-      "widgets_values": [],
+      "widgets_values": [
+        ""
+      ],
       "color": "#2a363b",
       "bgcolor": "#3f5159"
-    },
-    {
-      "id": 7,
-      "type": "HiDreamSampler",
-      "pos": [
-        840,
-        -180
-      ],
-      "size": [
-        340,
-        260
-      ],
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "prompt"
-          },
-          "link": 38
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "links": [
-            30,
-            39
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "HiDreamSampler",
-        "aux_id": "SanDiegoDude/ComfyUI-HiDream-Sampler",
-        "ver": "ae6c2ac8896c26b1fc0e58b8f70d478881663dd2"
-      },
-      "widgets_values": [
-        "dev-nf4",
-        "A collectable rare postage stamp with the text \"US Postal Service\" and the year \"1918\" and the price of 15 cents, featuring a US WW1 Soldier peeking over the top of a trench, stamp collection",
-        "1024 × 1024 (Square)",
-        1001,
-        "fixed",
-        -1,
-        -0.1,
-        1280,
-        1280
-      ],
-      "color": "#223",
-      "bgcolor": "#335"
     },
     {
       "id": 17,
@@ -238,7 +125,9 @@
         "cnr_id": "comfy-core",
         "ver": "0.3.27"
       },
-      "widgets_values": [],
+      "widgets_values": [
+        ""
+      ],
       "color": "#223",
       "bgcolor": "#335"
     },
@@ -269,7 +158,9 @@
         "cnr_id": "comfy-core",
         "ver": "0.3.27"
       },
-      "widgets_values": [],
+      "widgets_values": [
+        ""
+      ],
       "color": "#432",
       "bgcolor": "#653"
     },
@@ -311,7 +202,7 @@
         0.8000000000000002,
         "A collectable rare postage stamp with the text \"US Postal Service\" and the year \"1918\" and the price of 15 cents, featuring Micky Mouse peeking over the top of a trench, stamp collection",
         "",
-        311613013181500,
+        77982949035763,
         "randomize",
         "Default for model",
         -1,
@@ -325,6 +216,131 @@
       ],
       "color": "#432",
       "bgcolor": "#653"
+    },
+    {
+      "id": 7,
+      "type": "HiDreamSampler",
+      "pos": [
+        840,
+        -180
+      ],
+      "size": [
+        340,
+        352
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 38
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            30,
+            39
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HiDreamSampler",
+        "aux_id": "SanDiegoDude/ComfyUI-HiDream-Sampler",
+        "ver": "ae6c2ac8896c26b1fc0e58b8f70d478881663dd2"
+      },
+      "widgets_values": [
+        "dev-nf4",
+        "A collectable rare postage stamp with the text \"US Postal Service\" and the year \"1918\" and the price of 15 cents, featuring a US WW1 Soldier peeking over the top of a trench, stamp collection",
+        "",
+        "1024 × 1024 (Square)",
+        1,
+        42,
+        "fixed",
+        "Default for model",
+        -1,
+        -1,
+        0,
+        0
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 19,
+      "type": "HiDreamSamplerAdvanced",
+      "pos": [
+        0,
+        -180
+      ],
+      "size": [
+        360,
+        838
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "primary_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "primary_prompt"
+          },
+          "link": 37
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            28
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HiDreamSamplerAdvanced",
+        "aux_id": "SanDiegoDude/ComfyUI-HiDream-Sampler",
+        "ver": "7f3d4bbddbfca35aa84e9c386a94a1ce846bcc57"
+      },
+      "widgets_values": [
+        "dev-nf4",
+        "A collectable rare postage stamp with the text \"US Postal Service\" and the year \"1918\" and the price of 15 cents, featuring a US WW1 Soldier peeking over the top of a trench, stamp collection",
+        "deformed, ugly, watermark, text, scribbles, noise, static, low quality, bad quality, jpeg artifacts, low resolution",
+        "1024 × 1024 (Square)",
+        4,
+        42,
+        "fixed",
+        "Default for model",
+        -1,
+        -1,
+        false,
+        0,
+        false,
+        "painted by Georgia O'Keefe",
+        "painted by Georgia O'Keefe",
+        "painted by Georgia O'Keefe",
+        "",
+        "You are a creative AI assistant that helps create detailed, vivid images based on user descriptions.",
+        1,
+        1,
+        1,
+        1,
+        77,
+        150,
+        256,
+        256
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
     }
   ],
   "links": [
@@ -381,10 +397,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6830134553650705,
+      "scale": 0.620921323059155,
       "offset": [
-        430.69171761297434,
-        620.3821643547897
+        395.180098046875,
+        515.8049533984378
       ]
     },
     "ue_links": [],

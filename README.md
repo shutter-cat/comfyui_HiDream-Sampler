@@ -1,3 +1,5 @@
+## Imagequality is currently not the best, I'll try to find the issue tomorrow!
+
 ## Updates 13.04.
 
 - fixed cache overload
