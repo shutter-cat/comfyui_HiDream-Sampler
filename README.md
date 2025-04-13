@@ -1,7 +1,7 @@
-## Updates 11.04.
+## Updates 12.04.
 
+- Fixed according to [burgstall](https://github.com/Burgstall-labs): Not require auto-gptq anymore! Make sure to git pull and pip install -r requirements.txt! 
 - Added Image2image functionality
-- Fixed: Not require auto-gptq anymore! Make sure to git pull and pip install -r requirements.txt!
 - Flash Attention is no longer needed thanks to [power88](https://github.com/power88)
 - added uncesored Llama Support (Available via HiDream Sampler Advanced)
 
