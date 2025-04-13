@@ -486,6 +486,12 @@ class HiDreamSampler:
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
 
+        # Define progress callback
+        def progress_callback(pipe, i, t, callback_kwargs):
+            # Update ComfyUI progress bar
+            pbar.update_absolute(i+1)
+            return callback_kwargs
+
         try: 
             inference_device = comfy.model_management.get_torch_device()
         except Exception: 
@@ -518,6 +524,7 @@ class HiDreamSampler:
                     num_images_per_prompt=1,
                     generator=generator,
                     max_sequence_length=128,  # Default fallback
+                    callback_on_step_end=progress_callback,
                 ).images
             print("Pipeline inference finished.")
         except Exception as e: 
@@ -733,6 +740,12 @@ class HiDreamSamplerAdvanced:
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
         pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
+
+        # Define progress callback
+        def progress_callback(pipe, i, t, callback_kwargs):
+            # Update ComfyUI progress bar
+            pbar.update_absolute(i+1)
+            return callback_kwargs
         
         try:
             inference_device = comfy.model_management.get_torch_device()
@@ -785,6 +798,7 @@ class HiDreamSamplerAdvanced:
                     max_sequence_length_openclip=max_length_openclip,
                     max_sequence_length_t5=max_length_t5,
                     max_sequence_length_llama=max_length_llama,
+                    callback_on_step_end=progress_callback,
                 ).images
             print("Pipeline inference finished.")
         except Exception as e:
