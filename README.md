@@ -1,9 +1,12 @@
-## Updates 12.04.
+## Updates 13.04.
 
+- fixed cache overload
+- Added multi image generation (up to 8) (Img2img not yet supported!)
+- Fixed Sageattention fetch as first attention method.
 - Fixed according to [burgstall](https://github.com/Burgstall-labs): Not require auto-gptq anymore! Make sure to git pull and pip install -r requirements.txt! 
 - Added Image2image functionality
 - Flash Attention is no longer needed thanks to [power88](https://github.com/power88)
-- added uncesored Llama Support (Available via HiDream Sampler Advanced)
+- added working uncensored Llama Support (Available via HiDream Sampler Advanced) thanks to [sdujack2012](https://github.com/sdujack2012) but beware its not quantified so you could get an OOM
 
 ![image](sample_workflow/workflow.png)
 
