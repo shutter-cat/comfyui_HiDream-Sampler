@@ -1,0 +1,30 @@
+[project]
+name = "hidream_sampler"
+description = "ComfyUI Wrapper for HiDream with nf4 support for lower vram"
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = [
+    "transformers>=4.36.0",
+    "diffusers>=0.26.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "bitsandbytes>=0.41.0",
+    "optimum>=1.12.0",
+    "accelerate>=0.25.0",
+    "gptqmodel>=2.2.0",
+    "device-smi",
+    "tokenicer",
+    "threadpoolctl",
+    "logbar",
+    "datasets"
+]
+
+[project.urls]
+Repository = "https://github.com/lum3on/comfyui_HiDream-Sampler"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = "lum3on"
+DisplayName = "comfyui_HiDream-Sampler"
+Icon = "hhttps://avatars.githubusercontent.com/u/197819028?v=4"
