@@ -66,39 +66,6 @@
       "bgcolor": "#353"
     },
     {
-      "id": 2,
-      "type": "PreviewImage",
-      "pos": [
-        380,
-        -180
-      ],
-      "size": [
-        440,
-        420
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 28
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewImage",
-        "cnr_id": "comfy-core",
-        "ver": "0.3.27"
-      },
-      "widgets_values": [
-        ""
-      ],
-      "color": "#2a363b",
-      "bgcolor": "#3f5159"
-    },
-    {
       "id": 17,
       "type": "PreviewImage",
       "pos": [
@@ -202,7 +169,7 @@
         0.8000000000000002,
         "A collectable rare postage stamp with the text \"US Postal Service\" and the year \"1918\" and the price of 15 cents, featuring Micky Mouse peeking over the top of a trench, stamp collection",
         "",
-        77982949035763,
+        532986874756016,
         "randomize",
         "Default for model",
         -1,
@@ -341,6 +308,39 @@
       ],
       "color": "#2a363b",
       "bgcolor": "#3f5159"
+    },
+    {
+      "id": 2,
+      "type": "PreviewImage",
+      "pos": [
+        380,
+        -180
+      ],
+      "size": [
+        440,
+        420
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 28
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.27"
+      },
+      "widgets_values": [
+        ""
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
     }
   ],
   "links": [
@@ -397,10 +397,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.620921323059155,
+      "scale": 0.6303940863128511,
       "offset": [
-        395.180098046875,
-        515.8049533984378
+        308.380239914095,
+        483.3423162860777
       ]
     },
     "ue_links": [],
