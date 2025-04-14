@@ -32,8 +32,12 @@ A custom ComfyUI node for generating images using the HiDream AI model.
     ```bash
     pip install -r requirements.txt
     ```
-
-3. Restart ComfyUI.
+    or for the portable version:
+   ```bash
+   .\python_embeded\python.exe -m pip install -r .\ComfyUI\custom_nodes\comfyui_HiDream-Sampler\requirements.txt
+   ```
+   
+4. Restart ComfyUI.
 
 Steps to install SageAttention 1:
 - Install triton.
