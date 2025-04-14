@@ -1,7 +1,8 @@
-## Imagequality is currently not the best, I'll try to find the issue tomorrow!
+## Updates 14.04.
 
-## Updates 13.04.
-
+- fixed uncensored llm support
+- fixed pipelines
+- fixed image output
 - fixed cache overload
 - Added multi image generation (up to 8) (Img2img not yet supported!)
 - Fixed Sageattention fetch as first attention method.
