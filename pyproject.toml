@@ -1,4 +1,5 @@
 [project]
+
 name = "hidream-sampler"
 description = "A custom ComfyUI node for generating images using the HiDream AI model. Uses quantization for lower memory usage."
 version = "1.0.0"
@@ -10,6 +11,7 @@ Repository = "https://github.com/lum3on/comfyui_HiDream-Sampler"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = ""
+
+PublisherId = "lum3on"
 DisplayName = "comfyui_HiDream-Sampler"
-Icon = ""
+Icon = "hhttps://avatars.githubusercontent.com/u/197819028?v=4"

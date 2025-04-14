@@ -22,12 +22,12 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         
         try:
             import importlib.util
-            if importlib.util.find_spec("flash_attn_interface"):
-                attention_type = "FlashAttention3"
+            if importlib.util.find_spec("sageattention"):
+                attention_type = "SageAttention"
             elif importlib.util.find_spec("flash_attn"):
                 attention_type = "FlashAttention2"
-            elif importlib.util.find_spec("sageattention"):
-                attention_type = "SageAttention"
+            elif importlib.util.find_spec("flash_attn_interface"):
+                attention_type = "FlashAttention3"
         except:
             pass
         
@@ -40,12 +40,15 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
 
     
     # Execute the appropriate attention implementation
-    if attention_type == "FlashAttention3":
-        from flash_attn_interface import flash_attn_func
-        hidden_states = flash_attn_func(query, key, value, causal=False, deterministic=False)[0]
+    if attention_type == "SageAttention":
+        from sageattention import sageattn
+        hidden_states = sageattn(query, key, value, tensor_layout="NHD", is_causal=False)
     elif attention_type == "FlashAttention2":
         from flash_attn import flash_attn_func
         hidden_states = flash_attn_func(query, key, value, dropout_p=0., causal=False)
+    elif attention_type == "FlashAttention3":
+        from flash_attn_interface import flash_attn_func
+        hidden_states = flash_attn_func(query, key, value, causal=False, deterministic=False)[0]
     elif attention_type == "sdpa":
         q = query.transpose(1, 2)  
         k = key.transpose(1, 2)    
@@ -58,9 +61,6 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
             is_causal=False
         )
         hidden_states = hidden_states.transpose(1, 2)
-    elif attention_type == "SageAttention":
-        from sageattention import sageattn
-        hidden_states = sageattn(query, key, value, tensor_layout="NHD", is_causal=False)
     else:
         raise ValueError("Invalid attention implementation")
 
