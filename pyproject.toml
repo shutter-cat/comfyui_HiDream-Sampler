@@ -1,7 +1,7 @@
 [project]
 name = "hidream_sampler"
 description = "ComfyUI Wrapper for HiDream with nf4 support for lower vram"
-version = "1.0.0"
+version = "1.2.0"
 license = {file = "LICENSE"}
 dependencies = [
     "transformers>=4.36.0",
