@@ -479,7 +479,6 @@ class HiDreamSampler:
     def generate(self, model_type, prompt, negative_prompt, resolution, num_images, seed, scheduler, override_steps, override_cfg, override_width, override_height):
         use_uncensored_llm = None
 
-         # --- Generation Setup ---
         # Determine resolution
         if override_width > 0 and override_height > 0:
             height, width = override_height, override_width
@@ -495,6 +494,7 @@ class HiDreamSampler:
         if not MODEL_CONFIGS or model_type == "error":
             print("HiDream Error: No models loaded.")
             return (torch.zeros((1, 512, 512, 3)),)
+        
         pipe = None; config = None
         cache_key = f"{model_type}"
         
@@ -510,6 +510,7 @@ class HiDreamSampler:
                 pipe, config = None, None
             if valid_cache:
                 print("Using cached model.")
+
         if pipe is None:
             if self._model_cache:
                 print(f"Clearing ALL cache before loading {model_type}...")
@@ -518,7 +519,6 @@ class HiDreamSampler:
                     print(f"  Removing '{key}'...")
                     try:
                         pipe_to_del, _= self._model_cache.pop(key)
-                        # More aggressive cleanup - clear all major components
                         if hasattr(pipe_to_del, 'transformer'):
                             pipe_to_del.transformer = None
                         if hasattr(pipe_to_del, 'text_encoder_4'):
@@ -530,15 +530,18 @@ class HiDreamSampler:
                         del pipe_to_del
                     except Exception as e:
                         print(f"  Error removing {key}: {e}")
-                # Multiple garbage collection passes
-                for _ in range(3):
-                    gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    # Force synchronization
-                    torch.cuda.synchronize()
-                print("Cache cleared.")
-            print(f"Loading model for {model_type}{' (uncensored)' if use_uncensored_llm else ''}...")
+
+                    # Multiple garbage collection passes
+                    for _ in range(3):
+                        gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        # Force synchronization
+                        torch.cuda.synchronize()
+                    print("Cache cleared.")
+
+            print(f"Loading model for {model_type}...")
+
             try:
                 pipe, config = load_models(model_type, use_uncensored_llm)
                 self._model_cache[cache_key] = (pipe, config)
@@ -548,16 +551,18 @@ class HiDreamSampler:
                 import traceback
                 traceback.print_exc()
                 return (torch.zeros((1, 512, 512, 3)),)
+        
         if pipe is None or config is None:
             print("CRITICAL ERROR: Load failed.")
             return (torch.zeros((1, 512, 512, 3)),)
         
         # --- Update scheduler if requested ---
-        txt2img_pipe, model_config = load_models(model_type, use_uncensored_llm)
-        original_scheduler_class = model_config["scheduler_class"]
+        original_scheduler_class = config["scheduler_class"]
         original_shift = config["shift"]
+
         if scheduler != "Default for model":
             print(f"Replacing default scheduler ({original_scheduler_class}) with: {scheduler}")
+
             # Create a completely fresh scheduler instance to avoid any parameter leakage
             if scheduler == "UniPC":
                 new_scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=original_shift, use_dynamic_shifting=False)
@@ -585,12 +590,15 @@ class HiDreamSampler:
             # Ensure we're using the original scheduler as specified in the model config
             print(f"Using model's default scheduler: {original_scheduler_class}")
             pipe.scheduler = get_scheduler_instance(original_scheduler_class, original_shift)
+
         # --- Generation Setup ---
         is_nf4_current = config.get("is_nf4", False)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
+
         # Create the progress bar
         pbar = comfy.utils.ProgressBar(num_inference_steps)
+
         # Set default max sequence lengths
         max_length_clip_l = 77
         max_length_openclip = 150
@@ -602,18 +610,20 @@ class HiDreamSampler:
         openclip_weight = 1.0
         t5_weight = 1.0
         llama_weight = 1.0
-                     
+                    
         try:
             inference_device = comfy.model_management.get_torch_device()
         except Exception:
             inference_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         print(f"Creating Generator on: {inference_device}")
         generator = torch.Generator(device=inference_device).manual_seed(seed)
         print(f"\n--- Starting Generation ---")
         print(f"Model: {model_type}, Res: {height}x{width}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
         print(f"Using standard sequence lengths: CLIP-L: {max_length_clip_l}, OpenCLIP: {max_length_openclip}, T5: {max_length_t5}, Llama: {max_length_llama}")
+
         # --- Run Inference ---
-        output_images = None
+        pipeline_output = None
         try:
             if not is_nf4_current:
                 print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)")
@@ -621,33 +631,66 @@ class HiDreamSampler:
             else:
                 print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
             print("Executing pipeline inference...")
-            # Call pipeline with individual sequence lengths
-            with torch.inference_mode():
-                pipeline_output = pipe(
-                    prompt=prompt,           # CLIP-L 
-                    prompt_2=prompt,         # OpenCLIP - explicitly send same prompt
-                    prompt_3=prompt,         # T5 - explicitly send same prompt
-                    prompt_4=prompt,         # LLM - explicitly send same prompt
-                    negative_prompt=negative_prompt.strip() if negative_prompt else None,
-                    height=height,
-                    width=width,
-                    guidance_scale=guidance_scale,
-                    num_inference_steps=num_inference_steps,
-                    num_images_per_prompt=num_images,
-                    generator=generator,
-                    max_sequence_length_clip_l=max_length_clip_l,
-                    max_sequence_length_openclip=max_length_openclip,
-                    max_sequence_length_t5=max_length_t5,
-                    max_sequence_length_llama=max_length_llama,
-                    clip_l_scale=clip_l_weight,
-                    openclip_scale=openclip_weight,
-                    t5_scale=t5_weight,
-                    llama_scale=llama_weight,
-                )
 
-                output_images_list = pipeline_output.images
+            # Ensure batch size consistency for multiple images
+            if num_images > 1:
+                print(f"Preparing for batch generation with {num_images} images...")
+                # Create a list to store outputs
+                output_images_list = []
+                for i in range(num_images):
+                    print(f"Generating image {i+1}/{num_images}...")
+                    # Generate one image at a time to avoid batch size issues
+                    with torch.inference_mode():
+                        single_output = pipe(
+                            prompt=prompt,
+                            prompt_2=prompt,
+                            prompt_3=prompt,
+                            prompt_4=prompt,
+                            negative_prompt=negative_prompt.strip() if negative_prompt else None,
+                            height=height,
+                            width=width,
+                            guidance_scale=guidance_scale,
+                            num_inference_steps=num_inference_steps,
+                            num_images_per_prompt=1,  # Force single image per call
+                            generator=torch.Generator(device=inference_device).manual_seed(seed + i),  # Increment seed for variety
+                            max_sequence_length_clip_l=max_length_clip_l,
+                            max_sequence_length_openclip=max_length_openclip,
+                            max_sequence_length_t5=max_length_t5,
+                            max_sequence_length_llama=max_length_llama,
+                            clip_l_scale=clip_l_weight,
+                            openclip_scale=openclip_weight,
+                            t5_scale=t5_weight,
+                            llama_scale=llama_weight,
+                        )
+                    output_images_list.extend(single_output.images)
+                    pbar.update_absolute((i + 1) * num_inference_steps // num_images)
+            else:
+                with torch.inference_mode():
+                    pipeline_output = pipe(
+                        prompt=prompt,
+                        prompt_2=prompt,
+                        prompt_3=prompt,
+                        prompt_4=prompt,
+                        negative_prompt=negative_prompt.strip() if negative_prompt else None,
+                        height=height,
+                        width=width,
+                        guidance_scale=guidance_scale,
+                        num_inference_steps=num_inference_steps,
+                        num_images_per_prompt=num_images,
+                        generator=generator,
+                        max_sequence_length_clip_l=max_length_clip_l,
+                        max_sequence_length_openclip=max_length_openclip,
+                        max_sequence_length_t5=max_length_t5,
+                        max_sequence_length_llama=max_length_llama,
+                        clip_l_scale=clip_l_weight,
+                        openclip_scale=openclip_weight,
+                        t5_scale=t5_weight,
+                        llama_scale=llama_weight,
+                    )
+                    output_images_list = pipeline_output.images
 
             print("Pipeline inference finished.")
+
         except Exception as e:
             print(f"!!! ERROR during execution: {e}")
             import traceback
@@ -660,7 +703,6 @@ class HiDreamSampler:
         # Robust output handling
         if output_images_list is None or not isinstance(output_images_list, list) or len(output_images_list) == 0:
             print(f"ERROR: No images returned or invalid format (Type: {type(output_images_list)}). Creating blank image.")
-            # Ensure height/width are valid before creating tensor
             return (torch.zeros((1, height, width, 3)),)
 
         try:
@@ -673,11 +715,9 @@ class HiDreamSampler:
                     continue
 
                 print(f"Converting image {i+1}/{len(output_images_list)}...")
-                # Use your existing function to convert one image
                 single_tensor = pil2tensor(img) # This returns shape [1, H, W, C]
 
                 if single_tensor is not None:
-                    # Basic check for tensor validity from pil2tensor
                     if len(single_tensor.shape) == 4 and single_tensor.shape[0] == 1:
                         tensor_list.append(single_tensor)
                     else:
@@ -687,28 +727,21 @@ class HiDreamSampler:
 
             if not tensor_list:
                 print("ERROR: All image conversions failed. Creating blank image.")
-                # Ensure height/width are valid before creating tensor
                 return (torch.zeros((1, height, width, 3)),)
 
-            # Concatenate the list of tensors along the batch dimension (dim=0)
             output_tensor = torch.cat(tensor_list, dim=0)
             print(f"Successfully converted {output_tensor.shape[0]} images into batch tensor.")
 
-            # Fix for any non-float32 tensor issue (should be handled by pil2tensor, but check batch)
             if output_tensor.dtype != torch.float32:
                 print(f"Converting batched {output_tensor.dtype} tensor to float32 for ComfyUI compatibility")
                 output_tensor = output_tensor.to(torch.float32)
 
-            # Verify final tensor shape is valid (Batch, Height, Width, Channels)
-            # This check should now correctly handle batch_size > 1
             if len(output_tensor.shape) != 4 or output_tensor.shape[0] == 0 or output_tensor.shape[3] != 3:
                 print(f"ERROR: Invalid final batch tensor shape {output_tensor.shape}. Creating blank image.")
-                # Ensure height/width are valid before creating tensor
                 return (torch.zeros((1, height, width, 3)),)
 
-            print(f"Output tensor shape: {output_tensor.shape}") # Should be [num_images, height, width, 3]
+            print(f"Output tensor shape: {output_tensor.shape}") 
 
-            # After generating the image, try to clean up any temporary memory
             try:
                 import comfy.model_management as model_management
                 print("HiDream: Requesting ComfyUI memory cleanup...")
@@ -716,23 +749,18 @@ class HiDreamSampler:
             except Exception as e:
                 print(f"HiDream: ComfyUI cleanup failed: {e}")
 
-            # Log final memory usage
             if torch.cuda.is_available():
                 final_mem = torch.cuda.memory_allocated() / 1024**2
-                initial_mem = initial_mem if 'initial_mem' in locals() else 0 # Ensure initial_mem exists
                 print(f"HiDream: Final VRAM usage: {final_mem:.2f} MB (Change: {final_mem-initial_mem:.2f} MB)")
-
-            # Return the batch tensor within a tuple
+                
             return (output_tensor,)
-
+            
         except Exception as e:
-            print(f"Error processing output image batch: {e}")
+            print(f"Error processing output image: {e}")
             import traceback
             traceback.print_exc()
-            # Ensure height/width are valid before creating tensor
             return (torch.zeros((1, height, width, 3)),)
 
-# --- ComfyUI Node 2 Definition ---
 class HiDreamSamplerAdvanced:
     _model_cache = HiDreamSampler._model_cache
     cleanup_models = HiDreamSampler.cleanup_models
@@ -793,13 +821,7 @@ class HiDreamSamplerAdvanced:
             }
         }
     
-    def generate(self, model_type, primary_prompt, negative_prompt, resolution, num_images, seed, scheduler,
-                 override_steps, override_cfg, use_uncensored_llm=False,
-                 clip_l_prompt="", openclip_prompt="", t5_prompt="", llama_prompt="",
-                 llm_system_prompt="You are a creative AI assistant...",
-                 override_width=0, override_height=0,
-                 max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128,
-                 clip_l_weight=1.0, openclip_weight=1.0, t5_weight=1.0, llama_weight=1.0, **kwargs):
+    def generate(self, model_type, primary_prompt, negative_prompt, resolution, num_images, seed, scheduler, override_steps, override_cfg, use_uncensored_llm=False, clip_l_prompt="", openclip_prompt="", t5_prompt="", llama_prompt="", llm_system_prompt="You are a creative AI assistant...", override_width=0, override_height=0, max_length_clip_l=77, max_length_openclip=77, max_length_t5=128, max_length_llama=128,clip_l_weight=1.0, openclip_weight=1.0, t5_weight=1.0, llama_weight=1.0, **kwargs):
         
         # Determine resolution
         if override_width > 0 and override_height > 0:
@@ -819,8 +841,6 @@ class HiDreamSamplerAdvanced:
             return (torch.zeros((1, 512, 512, 3)),)
             
         pipe = None; config = None
-        
-        # Create cache key that includes uncensored state
         cache_key = f"{model_type}_{'uncensored' if use_uncensored_llm else 'standard'}"
         
         # --- Model Loading / Caching ---
@@ -844,7 +864,6 @@ class HiDreamSamplerAdvanced:
                     print(f"  Removing '{key}'...")
                     try:
                         pipe_to_del, _= self._model_cache.pop(key)
-                        # More aggressive cleanup - clear all major components
                         if hasattr(pipe_to_del, 'transformer'):
                             pipe_to_del.transformer = None
                         if hasattr(pipe_to_del, 'text_encoder_4'):
@@ -856,6 +875,7 @@ class HiDreamSamplerAdvanced:
                         del pipe_to_del
                     except Exception as e:
                         print(f"  Error removing {key}: {e}")
+
                 # Multiple garbage collection passes
                 for _ in range(3):
                     gc.collect()
@@ -866,6 +886,7 @@ class HiDreamSamplerAdvanced:
                 print("Cache cleared.")
                 
             print(f"Loading model for {model_type}{' (uncensored)' if use_uncensored_llm else ''}...")
+
             try:
                 pipe, config = load_models(model_type, use_uncensored_llm)
                 self._model_cache[cache_key] = (pipe, config)
@@ -919,7 +940,9 @@ class HiDreamSamplerAdvanced:
         is_nf4_current = config.get("is_nf4", False)
         num_inference_steps = override_steps if override_steps >= 0 else config["num_inference_steps"]
         guidance_scale = override_cfg if override_cfg >= 0.0 else config["guidance_scale"]
-        pbar = comfy.utils.ProgressBar(num_inference_steps) # Keep pbar for final update
+
+        # Create the progress bar
+        pbar = comfy.utils.ProgressBar(num_inference_steps)
         
         try:
             inference_device = comfy.model_management.get_torch_device()
@@ -933,7 +956,7 @@ class HiDreamSamplerAdvanced:
         print(f"Sequence lengths - CLIP-L: {max_length_clip_l}, OpenCLIP: {max_length_openclip}, T5: {max_length_t5}, Llama: {max_length_llama}")
         
         # --- Run Inference ---
-        output_images = None
+        pipeline_output = None
         try:
             if not is_nf4_current:
                 print(f"Ensuring pipe on: {inference_device} (Offload NOT enabled)")
@@ -942,9 +965,6 @@ class HiDreamSamplerAdvanced:
                 print(f"Skipping pipe.to({inference_device}) (CPU offload enabled).")
                 
             print("Executing pipeline inference...")
-            # Make width and height divisible by 64
-            width = (width // 64) * 64
-            height = (height // 64) * 64
             
             # Use specific prompts for each encoder, falling back to primary prompt if empty
             prompt_clip_l = clip_l_prompt.strip() if clip_l_prompt.strip() else primary_prompt
@@ -974,46 +994,70 @@ class HiDreamSamplerAdvanced:
             if not prompt_llama.strip():
                 prompt_llama = "."
                 custom_system_prompt = "You will only output a single period as your output '.'\nDo not add any other acknowledgement or extra text or data."
-
-            # Create the progress bar
-            pbar = comfy.utils.ProgressBar(num_inference_steps)
             
-            # Define a progress callback function that updates the ComfyUI progress bar
-            def progress_callback(pipe, i, t, callback_kwargs):
-                # Update ComfyUI progress bar
-                pbar.update_absolute(i+1)
-                return callback_kwargs
-            
-            # Call pipeline with encoder-specific prompts and system prompt
-            with torch.inference_mode():
-                pipeline_output = pipe(
-                    prompt=prompt_clip_l,         # CLIP-L specific prompt
-                    prompt_2=prompt_openclip,     # OpenCLIP specific prompt
-                    prompt_3=prompt_t5,           # T5 specific prompt
-                    prompt_4=prompt_llama,        # Llama specific prompt
-                    negative_prompt=negative_prompt.strip() if negative_prompt else None,
-                    height=height,
-                    width=width,
-                    guidance_scale=guidance_scale,
-                    num_inference_steps=num_inference_steps,
-                    num_images_per_prompt=num_images,
-                    generator=generator,
-                    max_sequence_length_clip_l=max_length_clip_l,
-                    max_sequence_length_openclip=max_length_openclip,
-                    max_sequence_length_t5=max_length_t5,
-                    max_sequence_length_llama=max_length_llama,
-                    llm_system_prompt=custom_system_prompt,
-                    clip_l_scale=clip_l_weight,
-                    openclip_scale=openclip_weight,
-                    t5_scale=t5_weight,
-                    llama_scale=llama_weight,
-                    callback_on_step_end=progress_callback,
-                    callback_on_step_end_tensor_inputs=["latents"],
-                )
-
-            output_images_list = pipeline_output.images
+            # Ensure batch size consistency for multiple images
+            if num_images > 1:
+                print(f"Preparing for batch generation with {num_images} images...")
+                # Create a list to store outputs
+                output_images_list = []
+                for i in range(num_images):
+                    print(f"Generating image {i+1}/{num_images}...")
+                    # Generate one image at a time to avoid batch size issues
+                    with torch.inference_mode():
+                        single_output = pipe(
+                            prompt=prompt_clip_l, 
+                            prompt_2=prompt_openclip,
+                            prompt_3=prompt_t5,
+                            prompt_4=prompt_llama,
+                            negative_prompt=negative_prompt.strip() if negative_prompt else None,
+                            height=height,
+                            width=width,
+                            guidance_scale=guidance_scale,
+                            num_inference_steps=num_inference_steps,
+                            num_images_per_prompt=num_images,
+                            generator=generator,
+                            max_sequence_length_clip_l=max_length_clip_l,
+                            max_sequence_length_openclip=max_length_openclip,
+                            max_sequence_length_t5=max_length_t5,
+                            max_sequence_length_llama=max_length_llama,
+                            llm_system_prompt=custom_system_prompt,
+                            clip_l_scale=clip_l_weight,
+                            openclip_scale=openclip_weight,
+                            t5_scale=t5_weight,
+                            llama_scale=llama_weight,
+                            callback_on_step_end_tensor_inputs=["latents"],
+                        )
+                    output_images_list.extend(single_output.images)
+                    pbar.update_absolute((i + 1) * num_inference_steps // num_images)
+            else:
+                with torch.inference_mode():
+                    pipeline_output = pipe(
+                            prompt=prompt_clip_l, 
+                            prompt_2=prompt_openclip,
+                            prompt_3=prompt_t5,
+                            prompt_4=prompt_llama,
+                            negative_prompt=negative_prompt.strip() if negative_prompt else None,
+                            height=height,
+                            width=width,
+                            guidance_scale=guidance_scale,
+                            num_inference_steps=num_inference_steps,
+                            num_images_per_prompt=num_images,
+                            generator=generator,
+                            max_sequence_length_clip_l=max_length_clip_l,
+                            max_sequence_length_openclip=max_length_openclip,
+                            max_sequence_length_t5=max_length_t5,
+                            max_sequence_length_llama=max_length_llama,
+                            llm_system_prompt=custom_system_prompt,
+                            clip_l_scale=clip_l_weight,
+                            openclip_scale=openclip_weight,
+                            t5_scale=t5_weight,
+                            llama_scale=llama_weight,
+                            callback_on_step_end_tensor_inputs=["latents"],
+                        )
+                    output_images_list = pipeline_output.images
 
             print("Pipeline inference finished.")
+
         except Exception as e:
             print(f"!!! ERROR during execution: {e}")
             import traceback
@@ -1026,7 +1070,6 @@ class HiDreamSamplerAdvanced:
         # Robust output handling
         if output_images_list is None or not isinstance(output_images_list, list) or len(output_images_list) == 0:
             print(f"ERROR: No images returned or invalid format (Type: {type(output_images_list)}). Creating blank image.")
-            # Ensure height/width are valid before creating tensor
             return (torch.zeros((1, height, width, 3)),)
 
         try:
@@ -1039,11 +1082,9 @@ class HiDreamSamplerAdvanced:
                     continue
 
                 print(f"Converting image {i+1}/{len(output_images_list)}...")
-                # Use your existing function to convert one image
                 single_tensor = pil2tensor(img) # This returns shape [1, H, W, C]
 
                 if single_tensor is not None:
-                    # Basic check for tensor validity from pil2tensor
                     if len(single_tensor.shape) == 4 and single_tensor.shape[0] == 1:
                         tensor_list.append(single_tensor)
                     else:
@@ -1053,28 +1094,21 @@ class HiDreamSamplerAdvanced:
 
             if not tensor_list:
                 print("ERROR: All image conversions failed. Creating blank image.")
-                # Ensure height/width are valid before creating tensor
                 return (torch.zeros((1, height, width, 3)),)
 
-            # Concatenate the list of tensors along the batch dimension (dim=0)
             output_tensor = torch.cat(tensor_list, dim=0)
             print(f"Successfully converted {output_tensor.shape[0]} images into batch tensor.")
 
-            # Fix for any non-float32 tensor issue (should be handled by pil2tensor, but check batch)
             if output_tensor.dtype != torch.float32:
                 print(f"Converting batched {output_tensor.dtype} tensor to float32 for ComfyUI compatibility")
                 output_tensor = output_tensor.to(torch.float32)
 
-            # Verify final tensor shape is valid (Batch, Height, Width, Channels)
-            # This check should now correctly handle batch_size > 1
             if len(output_tensor.shape) != 4 or output_tensor.shape[0] == 0 or output_tensor.shape[3] != 3:
                 print(f"ERROR: Invalid final batch tensor shape {output_tensor.shape}. Creating blank image.")
-                # Ensure height/width are valid before creating tensor
                 return (torch.zeros((1, height, width, 3)),)
 
-            print(f"Output tensor shape: {output_tensor.shape}") # Should be [num_images, height, width, 3]
+            print(f"Output tensor shape: {output_tensor.shape}") 
 
-            # After generating the image, try to clean up any temporary memory
             try:
                 import comfy.model_management as model_management
                 print("HiDream: Requesting ComfyUI memory cleanup...")
@@ -1082,20 +1116,16 @@ class HiDreamSamplerAdvanced:
             except Exception as e:
                 print(f"HiDream: ComfyUI cleanup failed: {e}")
 
-            # Log final memory usage
             if torch.cuda.is_available():
                 final_mem = torch.cuda.memory_allocated() / 1024**2
-                initial_mem = initial_mem if 'initial_mem' in locals() else 0 # Ensure initial_mem exists
                 print(f"HiDream: Final VRAM usage: {final_mem:.2f} MB (Change: {final_mem-initial_mem:.2f} MB)")
-
-            # Return the batch tensor within a tuple
+                
             return (output_tensor,)
-
+            
         except Exception as e:
-            print(f"Error processing output image batch: {e}")
+            print(f"Error processing output image: {e}")
             import traceback
             traceback.print_exc()
-            # Ensure height/width are valid before creating tensor
             return (torch.zeros((1, height, width, 3)),)
 
 
@@ -1266,19 +1296,15 @@ class HiDreamImg2Img:
             print(f"Checking cache for {cache_key}...")
             pipe, config = self._model_cache[cache_key]
             valid_cache = True
-            
             if pipe is None or config is None or not hasattr(pipe, 'transformer') or pipe.transformer is None:
                 valid_cache = False
                 print("Invalid cache, reloading...")
                 del self._model_cache[cache_key]
                 pipe, config = None, None
-                
             if valid_cache:
                 print("Using cached model.")
         
-        # Load model if needed
         if pipe is None:
-            # Clear cache before loading new model
             if self._model_cache:
                 print(f"Clearing img2img cache before loading {model_type}...")
                 keys_to_del = list(self._model_cache.keys())
@@ -1309,6 +1335,7 @@ class HiDreamImg2Img:
                 print("Cache cleared.")
             
             print(f"Loading model for {model_type} img2img...")
+
             try:
                 # First load regular model
                 txt2img_pipe, config = load_models(model_type, use_uncensored_llm)
@@ -1402,12 +1429,12 @@ class HiDreamImg2Img:
             
         print(f"Creating Generator on: {inference_device}")
         generator = torch.Generator(device=inference_device).manual_seed(seed)
-        
         print(f"\n--- Starting Img2Img Generation ---")
         _, h, w, _ = image.shape
         print(f"Model: {model_type}{' (uncensored)' if use_uncensored_llm else ''}, Input Size: {h}x{w}")
         print(f"Denoising: {denoising_strength}, Steps: {num_inference_steps}, CFG: {guidance_scale}, Seed: {seed}")
-        
+
+        # --- Run Inference ---
         output_images = None
         try:
             if not is_nf4_current:
@@ -1447,10 +1474,8 @@ class HiDreamImg2Img:
             import traceback
             traceback.print_exc()
             return (torch.zeros((1, h, w, 3)),)
-            
         finally:
             pbar.update_absolute(num_inference_steps) # Update pbar regardless
-            
         print("--- Generation Complete ---")
         
         # Robust output handling
