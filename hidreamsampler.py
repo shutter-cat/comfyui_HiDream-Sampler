@@ -259,16 +259,6 @@ def load_models(model_type, use_uncensored_llm=False):
         # Rest of standard model loading stays exactly the same
         if bnb_llm_config: text_encoder_load_kwargs["quantization_config"] = bnb_llm_config; print("     Using 4-bit BNB.")
         else: raise ImportError("BNB config required for standard LLM.")
-        # Determine the best available attention implementation
-        if flash_attn_available:
-            text_encoder_load_kwargs["attn_implementation"] = "flash_attention_2"
-            print("     Using Flash Attention 2.")
-        elif sdpa_available:
-            text_encoder_load_kwargs["attn_implementation"] = "sdpa"
-            print("     Using PyTorch SDPA attention.")
-        else:
-            text_encoder_load_kwargs["attn_implementation"] = "eager"
-            print("     Using standard eager attention.")
     
     print(f"[1b] Loading Tokenizer: {llama_model_name}..."); tokenizer = AutoTokenizer.from_pretrained(llama_model_name, use_fast=False); print("     Tokenizer loaded.")
 
@@ -281,9 +271,11 @@ def load_models(model_type, use_uncensored_llm=False):
             # Load the config and make a deep copy we can modify
             config = AutoConfig.from_pretrained(llama_model_name)
             
+            """
             # Completely replace the rope_scaling with a known good config
             config.rope_scaling = {"type": "linear", "factor": 1.0}
-            print(f"     ✅ Fixed rope_scaling to: {config.rope_scaling}")
+            print(f"     ✅ Fixed rope_scaling to: {config.rope_scaling}") 
+            """
             
             # Force using our fixed config
             text_encoder_load_kwargs["config"] = config
