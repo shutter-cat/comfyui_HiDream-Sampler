@@ -17,4 +17,7 @@ accelerate>=0.25.0
 sageattention
 gptqmodel>=2.0.0 # Add this based on user feedback
 
+triton==3.0.0 # Higher versions seem to crash for some Windows users
+
+
     
