@@ -84,16 +84,13 @@ except ImportError as e:
 # --- Model Paths ---
 ORIGINAL_MODEL_PREFIX = "HiDream-ai"
 NF4_MODEL_PREFIX = "azaneko"
-ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" # For original/FP8
-NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4" # For NF4
-# Add uncensored model paths (using the same model as NF4 since it's less censored)
-UNCENSORED_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4" 
-UNCENSORED_NF4_LLAMA_MODEL_NAME = "shuttercat/DarkIdol-Llama3.1-NF4-GPTQ" 
-# Fall back until I get something better working
-#UNCENSORED_NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
+
+ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" 
+NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
+UNCENSORED_LLAMA_MODEL_NAME = "Orenguteng/Llama-3.1-8B-Lexi-Uncensored-V2" 
+UNCENSORED_NF4_LLAMA_MODEL_NAME = "shuttercat/DarkIdol-Llama3.1-NF4-GPTQ"
+
 # --- Model Configurations ---
-# Added flags for dependency checks
-# requires_gptq_deps now means "requires Optimum for loading GPTQ format"
 MODEL_CONFIGS = {
     # --- NF4 Models (Require Optimum) ---
     "full-nf4": {
