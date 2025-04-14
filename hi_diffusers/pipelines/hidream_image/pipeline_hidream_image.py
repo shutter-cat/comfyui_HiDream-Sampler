@@ -233,7 +233,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt: Union[str, List[str]] = None,
         num_images_per_prompt: int = 1,
         max_sequence_length: int = 128,
-        system_prompt: Optional[str] = "You are a creative AI assistant that helps create detailed, vivid images based on user descriptions.",
+        system_prompt: Optional[str] = "",
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ):
@@ -242,32 +242,39 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
         
-        # Format prompts with system message - this is the key addition
+        # Format prompts with system message
         formatted_prompts = []
         for p in prompt:
-            # Use the proper chat template format for Llama 3
-            formatted_prompt = f"<|system|>\n{system_prompt}\n<|user|>\n{p}\n<|assistant|>"
+            if system_prompt:
+                formatted_prompt = f"<|system|>\n{system_prompt}\n<|user|>\n{p}\n<|assistant|>"
+            else:
+                formatted_prompt = f"<|user|>\n{p}\n<|assistant|>"
             formatted_prompts.append(formatted_prompt)
+        
+        # Calculate the actual maximum length being used
+        actual_max_length = min(max_sequence_length, self.tokenizer_4.model_max_length)
         
         text_inputs = self.tokenizer_4(
             formatted_prompts,
             padding="max_length",
-            max_length=min(max_sequence_length, self.tokenizer_4.model_max_length),
+            max_length=actual_max_length,  # Use the calculated length
             truncation=True,
             add_special_tokens=True,
             return_tensors="pt",
         )
         
-        # Rest of the method remains unchanged
         text_input_ids = text_inputs.input_ids
         attention_mask = text_inputs.attention_mask
         untruncated_ids = self.tokenizer_4(formatted_prompts, padding="longest", return_tensors="pt").input_ids
+        
         if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
-            removed_text = self.tokenizer_4.batch_decode(untruncated_ids[:, min(max_sequence_length, self.tokenizer_4.model_max_length) - 1 : -1])
+            removed_text = self.tokenizer_4.batch_decode(untruncated_ids[:, actual_max_length - 1 : -1])
             logger.warning(
-                "The following part of your input was truncated because `max_sequence_length` is set to "
-                f" {min(max_sequence_length, self.tokenizer_4.model_max_length)} tokens: {removed_text}"
+                "The following part of your input was truncated because the LLaMA max sequence length "
+                f"is set to {actual_max_length} tokens: {removed_text}"
             )
+        
+        # Rest of your function remains unchanged
         outputs = self.text_encoder_4(
             text_input_ids.to(device),
             attention_mask=attention_mask.to(device),
@@ -277,9 +284,11 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt_embeds = outputs.hidden_states[1:]
         prompt_embeds = torch.stack(prompt_embeds, dim=0)
         _,_ , seq_len, dim = prompt_embeds.shape
-        # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
+        
+        # duplicate text embeddings and attention mask for each generation per prompt
         prompt_embeds = prompt_embeds.repeat(1, 1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(-1, batch_size * num_images_per_prompt, seq_len, dim)
+        
         return prompt_embeds
     
     def encode_prompt(
@@ -306,7 +315,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         max_sequence_length_t5: Optional[int] = None,
         max_sequence_length_llama: Optional[int] = None,
         lora_scale: Optional[float] = None,
-        llm_system_prompt: str = "You are a creative AI assistant that helps create detailed, vivid images based on user descriptions.",
+        llm_system_prompt: str = "",
         clip_l_scale: float = 1.0,
         openclip_scale: float = 1.0,
         t5_scale: float = 1.0,
@@ -410,7 +419,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         max_sequence_length_openclip: Optional[int] = None,
         max_sequence_length_t5: Optional[int] = None,
         max_sequence_length_llama: Optional[int] = None,
-        llm_system_prompt: str = "You are a creative AI assistant that helps create detailed, vivid images based on user descriptions.",
+        llm_system_prompt: str = "",
         clip_l_scale: float = 1.0,
         openclip_scale: float = 1.0,
         t5_scale: float = 1.0,
@@ -593,7 +602,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         max_sequence_length_openclip: Optional[int] = None,
         max_sequence_length_t5: Optional[int] = None,
         max_sequence_length_llama: Optional[int] = None,
-        llm_system_prompt: str = "You are a creative AI assistant that helps create detailed, vivid images based on user descriptions.",
+        llm_system_prompt: str = "",
         clip_l_scale: float = 1.0,
         openclip_scale: float = 1.0,
         t5_scale: float = 1.0,
@@ -651,10 +660,6 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
             device=device,
             num_images_per_prompt=num_images_per_prompt,
             max_sequence_length=max_sequence_length,
-            max_sequence_length_clip_l=max_sequence_length_clip_l,
-            max_sequence_length_openclip=max_sequence_length_openclip,
-            max_sequence_length_t5=max_sequence_length_t5,
-            max_sequence_length_llama=max_sequence_length_llama,
             lora_scale=lora_scale,
             llm_system_prompt=llm_system_prompt,
             clip_l_scale=clip_l_scale,

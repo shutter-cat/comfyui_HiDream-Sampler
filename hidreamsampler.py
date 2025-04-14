@@ -1014,7 +1014,7 @@ class HiDreamSamplerAdvanced:
                             width=width,
                             guidance_scale=guidance_scale,
                             num_inference_steps=num_inference_steps,
-                            num_images_per_prompt=num_images,
+                            num_images_per_prompt=1,
                             generator=generator,
                             max_sequence_length_clip_l=max_length_clip_l,
                             max_sequence_length_openclip=max_length_openclip,
