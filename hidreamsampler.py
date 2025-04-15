@@ -324,7 +324,7 @@ def load_models(model_type, use_uncensored_llm=False):
 RESOLUTION_OPTIONS = [ # (Keep list the same)
     "1024 × 1024 (Square)","768 × 1360 (Portrait)","1360 × 768 (Landscape)",
     "880 × 1168 (Portrait)","1168 × 880 (Landscape)","1248 × 832 (Landscape)",
-    "832 × 1248 (Portrait)"
+    "832 × 1248 (Portrait)","1280 x 1280 (Square)","1536 x 1536 (Square)"
 ]
 
 def parse_resolution(resolution_str):
