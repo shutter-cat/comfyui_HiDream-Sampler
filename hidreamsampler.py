@@ -88,7 +88,7 @@ NF4_MODEL_PREFIX = "azaneko"
 ORIGINAL_LLAMA_MODEL_NAME = "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" 
 NF4_LLAMA_MODEL_NAME = "hugging-quants/Meta-Llama-3.1-8B-Instruct-GPTQ-INT4"
 UNCENSORED_LLAMA_MODEL_NAME = "Orenguteng/Llama-3.1-8B-Lexi-Uncensored-V2" 
-UNCENSORED_NF4_LLAMA_MODEL_NAME = "shuttercat/DarkIdol-Llama3.1-NF4-GPTQ"
+UNCENSORED_NF4_LLAMA_MODEL_NAME = "shuttercat/Llama-3.1-8B-Instruct-Fei-Int8-GPTQ"
 
 # --- Model Configurations ---
 MODEL_CONFIGS = {
